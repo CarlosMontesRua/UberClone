@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { colors, radii, spacing, typography } from '../config/theme';
+import { colors, radii, spacing, typography } from '../theme/theme';
 
 export const AppInput = ({
   label,

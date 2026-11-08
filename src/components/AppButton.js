@@ -1,6 +1,6 @@
 import { ActivityIndicator, Pressable, StyleSheet, Text } from 'react-native';
 
-import { colors, radii, spacing } from '../config/theme';
+import { colors, radii, spacing } from '../theme/theme';
 
 const variantStyles = StyleSheet.create({
   primary: {

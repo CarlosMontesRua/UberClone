@@ -72,7 +72,7 @@ export const validatePersonalData = (values) => {
   const fullName = values.fullName?.trim() ?? '';
   const documentNumber = values.documentNumber?.trim() ?? '';
   const phone = values.phone?.trim() ?? '';
-  const email = values.email?.trim() ?? '';
+  const email = values.email.trim() ?? '';
 
   if (!fullName) {
     errors.fullName = 'Ingresa tu nombre completo';
@@ -134,7 +134,7 @@ export const validatePersonalData = (values) => {
 export const validateVehicle = (values) => {
   const errors = {};
   const currentYear = new Date().getFullYear();
-  const plate = values.plate?.trim().toUpperCase() ?? '';
+  const plate = values.plate?.trim() ?? '';
   const brand = values.brand?.trim() ?? '';
   const model = values.model?.trim() ?? '';
   const year = values.year?.trim() ?? '';
@@ -170,20 +170,87 @@ export const validateVehicle = (values) => {
     errors.year = 'El año no puede superar el año actual';
   }
 
-  if (!hasValue(values.color)) {
-    errors.color = 'Selecciona el color del vehículo';
-  }
-
   if (!passengerCapacity) {
     errors.passengerCapacity = 'Ingresa la capacidad de pasajeros';
-  } else if (!DIGITS_PATTERN.test(passengerCapacity) || Number(passengerCapacity) < 1) {
+  } else if (!DIGITS_PATTERN.test(passengerCapacity) || passengerCapacity.length < 1) {
     errors.passengerCapacity = 'La capacidad debe ser un número mayor a 0';
-  } else if (values.category === 'xl' && Number(passengerCapacity) < 6) {
-    errors.passengerCapacity = 'La categoría XL requiere mínimo 6 pasajeros';
+  } else if (Number(passengerCapacity) > 10) {
+    errors.passengerCapacity = 'La capacidad máxima es de 10 pasajeros';
   }
 
   if (!values.vehiclePhoto) {
     errors.vehiclePhoto = 'La foto del vehículo es obligatoria';
+  }
+
+  return errors;
+};
+
+export const validateDocuments = (values) => {
+  const errors = {};
+  const currentYear = new Date().getFullYear();
+  const year = values.year?.trim() ?? '';
+  const isTechRequired = /^\d{4}$/.test(year) ? currentYear - Number(year) > 5 : false;
+
+  const isFutureDate = (value) => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (!match) return false;
+    const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return date > today;
+  };
+
+  // Número de licencia de conducción
+  if (!values.licenseNumber) {
+    errors.licenseNumber = 'Número de licencia de conducción requerido';
+  }
+
+  // Fotografía de licencia
+  if (!values.licensePhoto) {
+    errors.licensePhoto = 'Fotografía de la licencia requerida';
+  }
+
+  // Fecha de vencimiento de licencia
+  if (!values.licenseExpiry) {
+    errors.licenseExpiry = 'Fecha de vencimiento de la licencia requerida';
+  } else if (!isFutureDate(values.licenseExpiry)) {
+    errors.licenseExpiry = 'La fecha debe ser posterior a la fecha actual';
+  }
+
+  // SOAT
+  if (!values.soatPhoto) {
+    errors.soatPhoto = 'Fotografía del SOAT requerida';
+  }
+
+  // Fecha de vencimiento del SOAT
+  if (!values.soatExpiry) {
+    errors.soatExpiry = 'Fecha de vencimiento del SOAT requerida';
+  } else if (!isFutureDate(values.soatExpiry)) {
+    errors.soatExpiry = 'La fecha debe ser posterior a la fecha actual';
+  }
+
+  // Revisión técnico-mecánica (condicional por normativa colombiana)
+  if (isTechRequired) {
+    if (!values.techInspectionPhoto) {
+      errors.techInspectionPhoto = 'Fotografía obligatoria de la revisión técnico-mecánica';
+    }
+    if (!values.techInspectionExpiry) {
+      errors.techInspectionExpiry = 'Fecha de vencimiento de la revisión requerida';
+    } else if (!isFutureDate(values.techInspectionExpiry)) {
+      errors.techInspectionExpiry = 'La fecha debe ser posterior a la fecha actual';
+    }
+  }
+
+  // Correo de Mercado Pago
+  if (!values.mercadoPagoEmail) {
+    errors.mercadoPagoEmail = 'Correo electrónico requerido';
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.mercadoPagoEmail.trim())) {
+    errors.mercadoPagoEmail = 'Correo electrónico inválido';
+  }
+
+  // Aceptación de términos
+  if (!values.acceptTerms) {
+    errors.acceptTerms = 'Debes aceptar los términos y condiciones';
   }
 
   return errors;

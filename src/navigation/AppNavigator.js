@@ -5,9 +5,10 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { colors } from '../theme/theme';
 import { RegistrationProvider } from '../context/RegistrationContext';
 import { useRegistration } from '../hooks/useRegistration';
+import { DocumentsScreen } from '../screens/DocumentsScreen';
 import { PersonalDataScreen } from '../screens/PersonalDataScreen';
 import { VehicleScreen } from '../screens/VehicleScreen';
-import { validatePersonalData, validateVehicle } from '../utils/validations';
+import { validateDocuments, validatePersonalData, validateVehicle } from '../utils/validations';
 
 const Tab = createBottomTabNavigator();
 
@@ -58,6 +59,7 @@ const RegistrationTabs = () => {
   const isPersonalValid = Object.keys(validatePersonalData(registrationData)).length === 0;
   const isVehicleValid =
     isPersonalValid && Object.keys(validateVehicle(registrationData)).length === 0;
+  const isDocumentsValid = Object.keys(validateDocuments(registrationData)).length === 0;
 
   return (
     <Tab.Navigator
@@ -101,6 +103,16 @@ const RegistrationTabs = () => {
           title: 'Vehículo',
           tabBarIcon: ({ focused }) => (
             <TabIcon step={2} active={focused} completed={isVehicleValid} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Documents"
+        component={DocumentsScreen}
+        options={{
+          title: 'Documentos',
+          tabBarIcon: ({ focused }) => (
+            <TabIcon step={3} active={focused} completed={isDocumentsValid} />
           ),
         }}
       />

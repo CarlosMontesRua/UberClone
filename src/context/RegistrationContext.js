@@ -24,6 +24,14 @@ const INITIAL_REGISTRATION = {
   color: '',
   passengerCapacity: '',
   vehiclePhoto: '',
+  licenseNumber: '',
+  licensePhoto: '',
+  licenseExpiry: '',
+  soatPhoto: '',
+  soatExpiry: '',
+  techInspectionPhoto: '',
+  techInspectionExpiry: '',
+  mercadoPagoEmail: '',
 };
 
 const hasRegistrationData = (data) =>

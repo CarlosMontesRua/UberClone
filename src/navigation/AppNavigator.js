@@ -1,13 +1,17 @@
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View, Pressable } from 'react-native';
 import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
-import { colors } from '../theme/theme';
+import { colors, radii, spacing, typography } from '../theme/theme';
 import { RegistrationProvider } from '../context/RegistrationContext';
+import { AuthProvider } from '../context/AuthContext';
 import { useRegistration } from '../hooks/useRegistration';
 import { DocumentsScreen } from '../screens/DocumentsScreen';
 import { PersonalDataScreen } from '../screens/PersonalDataScreen';
 import { VehicleScreen } from '../screens/VehicleScreen';
+import { DriverDashboardScreen } from '../screens/DriverDashboardScreen';
+import { EarningsScreen } from '../screens/EarningsScreen';
+import { TripHistoryScreen } from '../screens/TripHistoryScreen';
 import { validateDocuments, validatePersonalData, validateVehicle } from '../utils/validations';
 
 const Tab = createBottomTabNavigator();
@@ -25,7 +29,7 @@ const navigationTheme = {
   },
 };
 
-const TabIcon = ({ step, active, completed }) => (
+const TabIcon = ({ step, active, completed, symbol }) => (
   <View
     style={[
       styles.tabIcon,
@@ -40,13 +44,14 @@ const TabIcon = ({ step, active, completed }) => (
         completed && !active && styles.tabIconTextCompleted,
       ]}
     >
-      {completed ? '✓' : step}
+      {symbol || (completed ? '✓' : step)}
     </Text>
   </View>
 );
 
 const RegistrationTabs = () => {
-  const { isHydrated, registrationData, resetVersion } = useRegistration();
+  const { isHydrated, registrationData, resetVersion, activeDriverId, setIsRegistered } =
+    useRegistration();
 
   if (!isHydrated) {
     return (
@@ -62,10 +67,79 @@ const RegistrationTabs = () => {
   const isDocumentsValid = Object.keys(validateDocuments(registrationData)).length === 0;
 
   return (
+    <View style={{ flex: 1 }}>
+      {activeDriverId ? (
+        <View style={styles.topBanner}>
+          <Text style={styles.topBannerText}>Ya tienes un registro activo.</Text>
+          <Pressable onPress={() => setIsRegistered(true)} style={styles.topBannerBtn}>
+            <Text style={styles.topBannerBtnText}>Ir al Panel de Conductor →</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      <Tab.Navigator
+        key={resetVersion}
+        initialRouteName="PersonalData"
+        backBehavior="initialRoute"
+        screenOptions={{
+          headerShown: false,
+          lazy: false,
+          tabBarActiveTintColor: colors.primary,
+          tabBarInactiveTintColor: colors.textMuted,
+          tabBarStyle: {
+            backgroundColor: colors.background,
+            borderTopColor: colors.border,
+            paddingTop: 6,
+          },
+          tabBarLabelStyle: {
+            fontSize: 11,
+            fontWeight: '700',
+            marginBottom: 2,
+          },
+          tabBarIconStyle: {
+            marginTop: 2,
+          },
+        }}
+      >
+        <Tab.Screen
+          name="PersonalData"
+          component={PersonalDataScreen}
+          options={{
+            title: 'Datos personales',
+            tabBarIcon: ({ focused }) => (
+              <TabIcon step={1} active={focused} completed={isPersonalValid} />
+            ),
+          }}
+        />
+        <Tab.Screen
+          name="Vehicle"
+          component={VehicleScreen}
+          options={{
+            title: 'Vehículo',
+            tabBarIcon: ({ focused }) => (
+              <TabIcon step={2} active={focused} completed={isVehicleValid} />
+            ),
+          }}
+        />
+        <Tab.Screen
+          name="Documents"
+          component={DocumentsScreen}
+          options={{
+            title: 'Documentos',
+            tabBarIcon: ({ focused }) => (
+              <TabIcon step={3} active={focused} completed={isDocumentsValid} />
+            ),
+          }}
+        />
+      </Tab.Navigator>
+    </View>
+  );
+};
+
+const DriverAppTabs = () => {
+  return (
     <Tab.Navigator
-      key={resetVersion}
-      initialRouteName="PersonalData"
-      backBehavior="initialRoute"
+      initialRouteName="Conducir"
       screenOptions={{
         headerShown: false,
         lazy: false,
@@ -87,45 +161,63 @@ const RegistrationTabs = () => {
       }}
     >
       <Tab.Screen
-        name="PersonalData"
-        component={PersonalDataScreen}
+        name="Conducir"
+        component={DriverDashboardScreen}
         options={{
-          title: 'Datos personales',
-          tabBarIcon: ({ focused }) => (
-            <TabIcon step={1} active={focused} completed={isPersonalValid} />
-          ),
+          title: 'Conducir',
+          tabBarIcon: ({ focused }) => <TabIcon symbol="🚗" active={focused} />,
         }}
       />
       <Tab.Screen
-        name="Vehicle"
-        component={VehicleScreen}
+        name="Ganancias"
+        component={EarningsScreen}
         options={{
-          title: 'Vehículo',
-          tabBarIcon: ({ focused }) => (
-            <TabIcon step={2} active={focused} completed={isVehicleValid} />
-          ),
+          title: 'Ganancias',
+          tabBarIcon: ({ focused }) => <TabIcon symbol="💰" active={focused} />,
         }}
       />
       <Tab.Screen
-        name="Documents"
-        component={DocumentsScreen}
+        name="Historial"
+        component={TripHistoryScreen}
         options={{
-          title: 'Documentos',
-          tabBarIcon: ({ focused }) => (
-            <TabIcon step={3} active={focused} completed={isDocumentsValid} />
-          ),
+          title: 'Historial',
+          tabBarIcon: ({ focused }) => <TabIcon symbol="📋" active={focused} />,
+        }}
+      />
+      <Tab.Screen
+        name="MiRegistro"
+        component={RegistrationTabs}
+        options={{
+          title: 'Mi Registro',
+          tabBarIcon: ({ focused }) => <TabIcon symbol="👤" active={focused} />,
         }}
       />
     </Tab.Navigator>
   );
 };
 
+const RootNavigation = () => {
+  const { isHydrated, isRegistered } = useRegistration();
+
+  if (!isHydrated) {
+    return (
+      <View style={styles.loading}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  return isRegistered ? <DriverAppTabs /> : <RegistrationTabs />;
+};
+
 export const AppNavigator = () => (
-  <RegistrationProvider>
-    <NavigationContainer theme={navigationTheme}>
-      <RegistrationTabs />
-    </NavigationContainer>
-  </RegistrationProvider>
+  <AuthProvider>
+    <RegistrationProvider>
+      <NavigationContainer theme={navigationTheme}>
+        <RootNavigation />
+      </NavigationContainer>
+    </RegistrationProvider>
+  </AuthProvider>
 );
 
 const styles = StyleSheet.create({
@@ -136,9 +228,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   tabIcon: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
@@ -164,4 +256,29 @@ const styles = StyleSheet.create({
   tabIconTextCompleted: {
     color: colors.accent,
   },
+  topBanner: {
+    backgroundColor: colors.surface,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  topBannerText: {
+    ...typography.caption,
+    color: colors.textMuted,
+  },
+  topBannerBtn: {
+    paddingVertical: 2,
+    paddingHorizontal: spacing.sm,
+  },
+  topBannerBtnText: {
+    ...typography.caption,
+    fontWeight: '700',
+    color: colors.accent,
+  },
 });
+
+export default AppNavigator;

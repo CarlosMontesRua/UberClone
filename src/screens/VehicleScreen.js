@@ -55,8 +55,7 @@ const getVehicleValues = (registrationData) => ({
 });
 
 export const VehicleScreen = ({ navigation }) => {
-  const { registrationData, updateRegistration, submitRegistration, resetRegistration } =
-    useRegistration();
+  const { registrationData, updateRegistration } = useRegistration();
   const pickImage = useImagePicker();
   const [isPickingPhoto, setIsPickingPhoto] = useState(false);
 
@@ -75,7 +74,6 @@ export const VehicleScreen = ({ navigation }) => {
     setFieldValue,
     markFieldTouched,
     setFormError,
-    setSubmitting,
     validateForm,
   } = useRegistrationForm(
     getVehicleValues(registrationData),
@@ -84,7 +82,6 @@ export const VehicleScreen = ({ navigation }) => {
   );
 
   const isPersonalValid = Object.keys(validatePersonalData(registrationData)).length === 0;
-  const canFinish = isValid && isPersonalValid;
 
   const handlePickPhoto = async (source) => {
     markFieldTouched('vehiclePhoto');
@@ -103,7 +100,7 @@ export const VehicleScreen = ({ navigation }) => {
     setFieldValue('vehiclePhoto', '');
   };
 
-  const handleFinish = async () => {
+  const handleContinue = () => {
     if (!validateForm()) return;
 
     if (!isPersonalValid) {
@@ -111,21 +108,8 @@ export const VehicleScreen = ({ navigation }) => {
       return;
     }
 
-    setSubmitting(true);
-
-    try {
-      await submitRegistration({ ...registrationData, ...values });
-
-      Alert.alert(
-        'Registro enviado',
-        'Tu solicitud fue enviada correctamente. Te contactaremos cuando tu perfil sea verificado.',
-        [{ text: 'Aceptar', onPress: () => resetRegistration() }],
-      );
-    } catch (error) {
-      setFormError(error.message || 'Ocurrió un error inesperado. Inténtalo de nuevo.');
-    } finally {
-      setSubmitting(false);
-    }
+    updateRegistration(values);
+    navigation.navigate('Documents');
   };
 
   return (
@@ -141,10 +125,10 @@ export const VehicleScreen = ({ navigation }) => {
           showsVerticalScrollIndicator={false}
         >
           <View style={commonStyles.progressTrack}>
-            <View style={[commonStyles.progressFill, commonStyles.progressFull]} />
+            <View style={[commonStyles.progressFill, commonStyles.progressHalf]} />
           </View>
 
-          <Text style={commonStyles.step}>Paso 2 de 2</Text>
+          <Text style={commonStyles.step}>Paso 2 de 3</Text>
           <Text style={commonStyles.title}>Tu vehículo</Text>
           <Text style={commonStyles.subtitle}>
             Registra los datos del vehículo con el que prestarás el servicio.
@@ -255,13 +239,11 @@ export const VehicleScreen = ({ navigation }) => {
               variant="outline"
               onPress={() => navigation.navigate('PersonalData')}
               style={styles.footerButton}
-              disabled={submitting}
             />
             <AppButton
-              title="Finalizar registro"
-              onPress={handleFinish}
-              loading={submitting}
-              disabled={!canFinish || submitting}
+              title="Continuar"
+              onPress={handleContinue}
+              disabled={!isValid || !isPersonalValid}
               style={styles.footerButton}
             />
           </View>

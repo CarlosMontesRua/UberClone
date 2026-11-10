@@ -17,7 +17,7 @@ import { AppButton } from '../components/AppButton';
 import { AppInput, PhotoField } from '../components/AppInput';
 import { colors, commonStyles, radii, spacing, typography } from '../theme/theme';
 import { useImagePicker, useRegistration, useRegistrationForm } from '../hooks/useRegistration';
-import { validateDocuments } from '../utils/validations';
+import { validateDocuments, validatePersonalData, validateVehicle } from '../utils/validations';
 
 const COMMISSION_PERCENT = 20;
 const TECH_REVIEW_VEHICLE_AGE_LIMIT = 5;
@@ -60,7 +60,7 @@ const getDocumentsValues = (registrationData) => ({
 });
 
 export const DocumentsScreen = ({ navigation }) => {
-  const { registrationData, updateRegistration } = useRegistration();
+  const { registrationData, updateRegistration, submitRegistration } = useRegistration();
   const insets = useSafeAreaInsets();
   const pickImage = useImagePicker();
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -78,8 +78,11 @@ export const DocumentsScreen = ({ navigation }) => {
     values,
     errors,
     isValid,
+    submitting,
     setFieldValue,
     markFieldTouched,
+    setSubmitting,
+    setFormError,
     validateForm,
   } = useRegistrationForm(
     getDocumentsValues(registrationData),
@@ -137,16 +140,43 @@ export const DocumentsScreen = ({ navigation }) => {
     setFieldValue('acceptTerms', !values.acceptTerms);
   };
 
-  const handleContinue = () => {
+  const handleFinish = async () => {
     if (!validateForm()) return;
 
-    updateRegistration(values);
+    const personalErrors = validatePersonalData(registrationData);
+    if (Object.keys(personalErrors).length > 0) {
+      Alert.alert(
+        'Faltan datos personales',
+        'Por favor completa la información obligatoria en el Paso 1 (Datos personales).',
+        [{ text: 'Ir a Datos Personales', onPress: () => navigation.navigate('PersonalData') }],
+      );
+      return;
+    }
 
-    Alert.alert(
-      'Información guardada',
-      'Tus documentos y datos de pago fueron registrados correctamente.',
-      [{ text: 'Aceptar' }],
-    );
+    const vehicleErrors = validateVehicle(registrationData);
+    if (Object.keys(vehicleErrors).length > 0) {
+      Alert.alert(
+        'Faltan datos del vehículo',
+        'Por favor completa la información de tu vehículo en el Paso 2 (Vehículo).',
+        [{ text: 'Ir a Vehículo', onPress: () => navigation.navigate('Vehicle') }],
+      );
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await submitRegistration({ ...registrationData, ...values });
+      Alert.alert(
+        'Registro exitoso',
+        'Tus datos personales, de vehículo y documentos han sido enviados exitosamente a Firestore. Tu cuenta ha quedado en estado pendiente de aprobación.',
+        [{ text: 'Entendido' }],
+      );
+    } catch (error) {
+      setFormError(error.message || 'Error guardando en base de datos. Inténtalo de nuevo.');
+      Alert.alert('Error', error.message || 'No se pudo guardar el registro en Firebase.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -374,10 +404,27 @@ export const DocumentsScreen = ({ navigation }) => {
         </ScrollView>
 
         <View style={commonStyles.footer}>
-          <Text style={styles.requiredHint}>
-            Completa todos los campos obligatorios para continuar.
-          </Text>
-          <AppButton title="Guardar y continuar" onPress={handleContinue} disabled={!isValid} />
+          {!isValid ? (
+            <Text style={styles.requiredHint}>
+              Completa todos los campos obligatorios para finalizar.
+            </Text>
+          ) : null}
+          <View style={styles.footerRow}>
+            <AppButton
+              title="Regresar"
+              variant="outline"
+              onPress={() => navigation.navigate('Vehicle')}
+              style={styles.footerButton}
+              disabled={submitting}
+            />
+            <AppButton
+              title="Finalizar registro"
+              onPress={handleFinish}
+              disabled={!isValid || submitting}
+              loading={submitting}
+              style={styles.footerButton}
+            />
+          </View>
         </View>
       </KeyboardAvoidingView>
 
@@ -570,5 +617,12 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textAlign: 'center',
     marginBottom: spacing.sm,
+  },
+  footerRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  footerButton: {
+    flex: 1,
   },
 });

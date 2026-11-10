@@ -148,7 +148,7 @@ export const PersonalDataScreen = ({ navigation }) => {
             <View style={[commonStyles.progressFill, commonStyles.progressHalf]} />
           </View>
 
-          <Text style={commonStyles.step}>Paso 1 de 2</Text>
+          <Text style={commonStyles.step}>Paso 1 de 3</Text>
           <Text style={commonStyles.title}>Datos personales</Text>
           <Text style={commonStyles.subtitle}>
             Completa tu información para iniciar el proceso de registro como conductor.

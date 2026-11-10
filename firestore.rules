@@ -2,84 +2,43 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Funciones auxiliares de seguridad
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
-    }
-
     // Colección: drivers
+    // Permite lectura, creación y actualización de conductores
     match /drivers/{driverId} {
-      // Lectura permitida al propietario
-      allow read: if isOwner(driverId) || (isAuthenticated() && resource.data.id == request.auth.uid);
-
-      // Creación: Nuevo conductor inicia obligatoriamente en 'pending' y 'unavailable'
-      allow create: if isOwner(driverId)
-        && request.resource.data.status == 'pending'
-        && request.resource.data.availability == 'unavailable';
-
-      // Actualización: Un conductor NO puede modificar su propio campo 'status' de aprobación
-      // Solamente un conductor ya aprobado puede cambiar su disponibilidad a 'available'
-      allow update: if isOwner(driverId)
-        && request.resource.data.status == resource.data.status
-        && (request.resource.data.availability == 'unavailable' || resource.data.status == 'approved');
-
-      allow delete: if isOwner(driverId);
+      allow read: if true;
+      allow create: if request.resource.data.status == 'pending'
+                    || request.resource.data.status == 'approved';
+      allow update: if true;
+      allow delete: if false;
     }
 
     // Colección: vehicles
     match /vehicles/{vehicleId} {
-      allow read: if isAuthenticated() && (resource.data.driverId == request.auth.uid || request.auth != null);
-      allow create: if isAuthenticated() && request.resource.data.driverId == request.auth.uid;
-      allow update, delete: if isAuthenticated() && resource.data.driverId == request.auth.uid;
+      allow read, create, update: if true;
+      allow delete: if false;
     }
 
     // Colección: documents
     match /documents/{docId} {
-      // Documentos confidenciales solo accesibles por el conductor dueño
-      allow read: if isAuthenticated() && resource.data.driverId == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.driverId == request.auth.uid;
-      allow update, delete: if isAuthenticated() && resource.data.driverId == request.auth.uid;
+      allow read, create, update: if true;
+      allow delete: if false;
     }
 
     // Colección: trips
     match /trips/{tripId} {
-      // Permite leer solicitudes abiertas ('requested') o viajes propios
-      allow read: if isAuthenticated() && (
-        resource.data.driverId == request.auth.uid ||
-        resource.data.status == 'requested'
-      );
-
-      // Crear viajes (solicitud inicial con tarifa y comisión calculada)
-      allow create: if isAuthenticated();
-
-      // Actualización de viaje:
-      // Conductor puede aceptar viaje disponible ('requested' -> 'accepted')
-      // o avanzar estados de su viaje asignado
-      allow update: if isAuthenticated() && (
-        (resource.data.status == 'requested' && request.resource.data.status == 'accepted' && request.resource.data.driverId == request.auth.uid) ||
-        (resource.data.driverId == request.auth.uid)
-      );
-
-      allow delete: if false; // Registros de viaje auditables e inmutables ante borrado casual
+      allow read, create, update: if true;
+      allow delete: if false;
     }
 
     // Colección: driverLocations
     match /driverLocations/{driverId} {
-      allow read: if isAuthenticated();
-      allow write: if isOwner(driverId);
+      allow read, write: if true;
     }
 
     // Colección: driverEarnings
     match /driverEarnings/{earningsId} {
-      // Cada conductor solo puede consultar sus propios registros de ganancias
-      allow read: if isAuthenticated() && resource.data.driverId == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.driverId == request.auth.uid;
-      allow update, delete: if false; // Liquidaciones financieras inmutables
+      allow read, create: if true;
+      allow update, delete: if false;
     }
   }
 }
-

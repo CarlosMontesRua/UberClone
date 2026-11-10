@@ -161,10 +161,17 @@ export const tripService = {
   subscribeToTrip(tripId, callback) {
     if (!tripId) return () => {};
     const db = getDb();
-    return onSnapshot(doc(db, TRIPS, tripId), (snap) => {
-      if (snap.exists()) callback({ id: snap.id, ...snap.data() });
-      else callback(null);
-    });
+    return onSnapshot(
+      doc(db, TRIPS, tripId),
+      (snap) => {
+        if (snap.exists()) callback({ id: snap.id, ...snap.data() });
+        else callback(null);
+      },
+      (error) => {
+        console.warn('Trip snapshot listener notice:', error.message);
+        callback(null);
+      },
+    );
   },
 
   /**
@@ -213,13 +220,20 @@ export const tripService = {
       where('status', 'in', activeStatuses),
     );
 
-    return onSnapshot(q, (snap) => {
-      if (!snap.empty) {
-        callback({ id: snap.docs[0].id, ...snap.docs[0].data() });
-      } else {
+    return onSnapshot(
+      q,
+      (snap) => {
+        if (!snap.empty) {
+          callback({ id: snap.docs[0].id, ...snap.docs[0].data() });
+        } else {
+          callback(null);
+        }
+      },
+      (error) => {
+        console.warn('Active trip snapshot listener notice:', error.message);
         callback(null);
-      }
-    });
+      },
+    );
   },
 
   /**

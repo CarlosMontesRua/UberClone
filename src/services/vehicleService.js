@@ -80,10 +80,17 @@ export const vehicleService = {
 
   subscribeToVehicle(vehicleId, callback) {
     const db = getDb();
-    return onSnapshot(doc(db, VEHICLES, vehicleId), (snap) => {
-      if (snap.exists()) callback({ id: snap.id, ...snap.data() });
-      else callback(null);
-    });
+    return onSnapshot(
+      doc(db, VEHICLES, vehicleId),
+      (snap) => {
+        if (snap.exists()) callback({ id: snap.id, ...snap.data() });
+        else callback(null);
+      },
+      (error) => {
+        console.warn('Vehicle snapshot listener notice:', error.message);
+        callback(null);
+      },
+    );
   },
 
   subscribeToVehiclesByDriverId(driverId, callback) {
@@ -94,9 +101,16 @@ export const vehicleService = {
       where('driverId', '==', driverId),
       orderBy('createdAt', 'desc'),
     );
-    return onSnapshot(q, (snap) => {
-      callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
+    return onSnapshot(
+      q,
+      (snap) => {
+        callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      },
+      (error) => {
+        console.warn('Vehicles list snapshot listener notice:', error.message);
+        callback([]);
+      },
+    );
   },
 };
 

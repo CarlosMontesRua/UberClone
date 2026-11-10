@@ -136,24 +136,29 @@ export const RegistrationProvider = ({ children }) => {
     // 1. Obtener o crear ID de autenticación
     let driverId = authService.getCurrentUser()?.uid;
 
-    if (!driverId) {
-      if (data.email && data.password && data.password.length >= 8) {
-        try {
-          const user = await authService.register(data.email, data.password);
-          driverId = user.uid;
-        } catch {
-          // Si el correo ya existe, intentar iniciar sesión
+    if (!driverId && data.email) {
+      const passwordToUse =
+        data.password && data.password.length >= 8
+          ? data.password
+          : `Uber.${data.documentNumber || '123456'}!`;
+
+      try {
+        const user = await authService.register(data.email, passwordToUse);
+        driverId = user.uid;
+      } catch (authError) {
+        if (authError.code === 'auth/email-already-in-use') {
           try {
-            const user = await authService.login(data.email, data.password);
+            const user = await authService.login(data.email, passwordToUse);
             driverId = user.uid;
           } catch {
-            driverId = 'driver_' + Date.now();
+            driverId = 'driver_' + (data.documentNumber || Date.now());
           }
+        } else {
+          driverId = 'driver_' + (data.documentNumber || Date.now());
         }
-      } else {
-        // ID único generado para el conductor
-        driverId = 'driver_' + (data.documentNumber || Date.now());
       }
+    } else if (!driverId) {
+      driverId = 'driver_' + (data.documentNumber || Date.now());
     }
 
     // 2. Guardar en Colección drivers

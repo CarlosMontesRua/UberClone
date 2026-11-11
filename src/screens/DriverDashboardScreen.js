@@ -92,9 +92,11 @@ export const DriverDashboardScreen = ({ navigation }) => {
       return;
     }
 
-    const unsubscribe = tripService.subscribeToAvailableRequests(null, (requests) => {
-      setAvailableRequests(requests);
-    });
+    const unsubscribe = tripService.subscribeToAvailableRequests(
+      null,
+      (requests) => setAvailableRequests(requests),
+      activeDriverId,
+    );
 
     return () => unsubscribe();
   }, [driver?.availability, activeTrip]);
@@ -196,7 +198,7 @@ export const DriverDashboardScreen = ({ navigation }) => {
     try {
       const demoTrips = [
         {
-          passengerId: 'María Gómez',
+          passengerName: 'María Gómez',
           origin: { address: 'Calle 72 # 11-86, Zona Rosa', latitude: 4.657, longitude: -74.058 },
           destination: { address: 'Aeropuerto El Dorado, T1', latitude: 4.701, longitude: -74.146 },
           fare: 35000,
@@ -207,7 +209,7 @@ export const DriverDashboardScreen = ({ navigation }) => {
           paymentMethod: 'mercadopago',
         },
         {
-          passengerId: 'Andrés Castro',
+          passengerName: 'Andrés Castro',
           origin: { address: 'Parque de la 93, Cra 13', latitude: 4.676, longitude: -74.048 },
           destination: { address: 'Centro Comercial Unicentro', latitude: 4.702, longitude: -74.041 },
           fare: 18000,
@@ -382,7 +384,7 @@ export const DriverDashboardScreen = ({ navigation }) => {
             </View>
 
             <View style={styles.tripDetails}>
-              <Text style={styles.tripPassenger}>👤 Pasajero: {currentRequest.passengerId}</Text>
+              <Text style={styles.tripPassenger}>👤 Pasajero: {currentRequest.passengerName || currentRequest.passengerId}</Text>
               <Text style={styles.tripRoute}>🟢 Origen: {currentRequest.origin?.address || 'Ubicación origen'}</Text>
               <Text style={styles.tripRoute}>🔴 Destino: {currentRequest.destination?.address || 'Ubicación destino'}</Text>
 
@@ -431,7 +433,7 @@ export const DriverDashboardScreen = ({ navigation }) => {
             </View>
 
             <View style={styles.activeTripBody}>
-              <Text style={styles.tripPassenger}>👤 {activeTrip.passengerId}</Text>
+              <Text style={styles.tripPassenger}>👤 {activeTrip.passengerName || activeTrip.passengerId}</Text>
               <Text style={styles.tripRoute}>🟢 {activeTrip.origin?.address}</Text>
               <Text style={styles.tripRoute}>🔴 {activeTrip.destination?.address}</Text>
 

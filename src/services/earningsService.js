@@ -25,7 +25,8 @@ export const earningsService = {
     if (!driverId || !tripId) throw new Error('driverId y tripId son requeridos');
 
     const db = getDb();
-    const earningsRef = doc(collection(db, EARNINGS));
+    // One immutable settlement document per trip prevents duplicate payouts.
+    const earningsRef = doc(db, EARNINGS, tripId);
     const now = new Date().toISOString();
 
     const roundedFare = Math.round(Number(fare) || 0);

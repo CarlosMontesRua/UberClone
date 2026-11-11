@@ -1,8 +1,6 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // Funciones auxiliares de seguridad
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -11,75 +9,190 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // Colección: drivers
-    match /drivers/{driverId} {
-      // Lectura permitida al propietario
-      allow read: if isOwner(driverId) || (isAuthenticated() && resource.data.id == request.auth.uid);
+    function isApprovedDriver(userId) {
+      let driverPath = /databases/$(database)/documents/drivers/$(userId);
+      return isOwner(userId)
+        && exists(driverPath)
+          && get(driverPath).data.status == 'approved'
+          && get(driverPath).data.availability == 'available';
+    }
 
-      // Creación: Nuevo conductor inicia obligatoriamente en 'pending' y 'unavailable'
+    match /drivers/{driverId} {
+      allow read: if isOwner(driverId);
+
       allow create: if isOwner(driverId)
+        && request.resource.data.id == driverId
         && request.resource.data.status == 'pending'
         && request.resource.data.availability == 'unavailable';
 
-      // Actualización: Un conductor NO puede modificar su propio campo 'status' de aprobación
-      // Solamente un conductor ya aprobado puede cambiar su disponibilidad a 'available'
+      // Approval is an administrative action. Drivers may update their profile,
+      // but cannot approve themselves or become available while unapproved.
       allow update: if isOwner(driverId)
+        && request.resource.data.id == resource.data.id
         && request.resource.data.status == resource.data.status
-        && (request.resource.data.availability == 'unavailable' || resource.data.status == 'approved');
+        && (request.resource.data.availability == 'unavailable'
+          || resource.data.status == 'approved');
 
       allow delete: if isOwner(driverId);
     }
 
-    // Colección: vehicles
     match /vehicles/{vehicleId} {
-      allow read: if isAuthenticated() && (resource.data.driverId == request.auth.uid || request.auth != null);
-      allow create: if isAuthenticated() && request.resource.data.driverId == request.auth.uid;
-      allow update, delete: if isAuthenticated() && resource.data.driverId == request.auth.uid;
-    }
-
-    // Colección: documents
-    match /documents/{docId} {
-      // Documentos confidenciales solo accesibles por el conductor dueño
       allow read: if isAuthenticated() && resource.data.driverId == request.auth.uid;
       allow create: if isAuthenticated() && request.resource.data.driverId == request.auth.uid;
       allow update, delete: if isAuthenticated() && resource.data.driverId == request.auth.uid;
     }
 
-    // Colección: trips
+    match /documents/{documentId} {
+      allow read: if isAuthenticated() && resource.data.driverId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.driverId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && resource.data.driverId == request.auth.uid;
+    }
+
     match /trips/{tripId} {
-      // Permite leer solicitudes abiertas ('requested') o viajes propios
+      function isAcceptingRequest() {
+        return resource.data.status == 'requested'
+          && resource.data.driverId == null
+          && request.resource.data.status == 'accepted'
+          && request.resource.data.driverId == request.auth.uid
+          && request.resource.data.expiresAt > request.time.toMillis()
+          && isApprovedDriver(request.auth.uid)
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['driverId', 'status', 'updatedAt']);
+      }
+
+      function isDecliningRequest() {
+        return resource.data.status == 'requested'
+          && resource.data.driverId == null
+          && request.resource.data.status == 'requested'
+          && request.resource.data.driverId == null
+          && request.resource.data.get('declinedBy', []).hasAll([request.auth.uid])
+          && isApprovedDriver(request.auth.uid)
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['declinedBy', 'updatedAt']);
+      }
+
+      function isExpiringRequest() {
+        return resource.data.status == 'requested'
+          && resource.data.expiresAt <= request.time.toMillis()
+          && request.resource.data.status == 'cancelled'
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'updatedAt']);
+      }
+
+      function isValidAssignedDriverTransition() {
+        return resource.data.driverId == request.auth.uid
+          && request.resource.data.driverId == resource.data.driverId
+          && (
+            (resource.data.status == 'accepted'
+              && request.resource.data.status in ['driver_arriving', 'cancelled'])
+            || (resource.data.status == 'driver_arriving'
+              && request.resource.data.status in ['in_progress', 'cancelled'])
+            || (resource.data.status == 'in_progress'
+              && request.resource.data.status in ['completed', 'cancelled'])
+            || (resource.data.status == 'completed'
+              && request.resource.data.status == 'paid'
+              && request.resource.data.paymentStatus == 'paid')
+          )
+          && (request.resource.data.status == 'completed'
+            ? request.resource.data.completedAt is string
+            : request.resource.data.completedAt == resource.data.completedAt)
+          && (request.resource.data.status == 'paid'
+            ? request.resource.data.paymentStatus == 'paid'
+            : request.resource.data.paymentStatus == resource.data.paymentStatus)
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'updatedAt', 'completedAt', 'paymentStatus']);
+      }
+
       allow read: if isAuthenticated() && (
-        resource.data.driverId == request.auth.uid ||
-        resource.data.status == 'requested'
+        (resource.data.status == 'requested' && isApprovedDriver(request.auth.uid))
+        || resource.data.driverId == request.auth.uid
       );
 
-      // Crear viajes (solicitud inicial con tarifa y comisión calculada)
-      allow create: if isAuthenticated();
+      // The requester must identify itself. A trusted backend should calculate
+      // production fares; this app currently creates demo requests client-side.
+      allow create: if isAuthenticated()
+        && request.resource.data.keys().hasAll([
+          'id', 'driverId', 'passengerId', 'passengerName', 'origin', 'destination',
+          'distanceKm', 'durationMin', 'category', 'fare', 'commission', 'tip',
+          'driverEarnings', 'commissionRate', 'paymentMethod', 'paymentStatus',
+          'paymentId', 'status', 'declinedBy', 'rating', 'createdAt', 'expiresAt',
+          'completedAt', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'id', 'driverId', 'passengerId', 'passengerName', 'origin', 'destination',
+          'distanceKm', 'durationMin', 'category', 'fare', 'commission', 'tip',
+          'driverEarnings', 'commissionRate', 'paymentMethod', 'paymentStatus',
+          'paymentId', 'status', 'declinedBy', 'rating', 'createdAt', 'expiresAt',
+          'completedAt', 'updatedAt'
+        ])
+        && request.resource.data.id == tripId
+        && request.resource.data.passengerId == request.auth.uid
+        && request.resource.data.driverId == null
+        && request.resource.data.status == 'requested'
+        && request.resource.data.paymentStatus == 'pending'
+        && request.resource.data.declinedBy is list
+        && request.resource.data.declinedBy.size() == 0
+        && request.resource.data.expiresAt > request.time.toMillis()
+        && request.resource.data.expiresAt <= request.time.toMillis() + 30000
+        && request.resource.data.fare is int
+        && request.resource.data.fare >= 0
+        && request.resource.data.commission is int
+        && request.resource.data.commission >= 0
+        && request.resource.data.commission <= request.resource.data.fare
+        && request.resource.data.tip is int
+        && request.resource.data.tip >= 0
+        && request.resource.data.driverEarnings
+          == request.resource.data.fare - request.resource.data.commission + request.resource.data.tip
+        && request.resource.data.commissionRate == 0.2
+        && request.resource.data.rating >= 0
+        && request.resource.data.rating <= 5
+        && request.resource.data.category in ['economy', 'xl', 'premium']
+        && request.resource.data.paymentMethod in ['cash', 'mercadopago'];
 
-      // Actualización de viaje:
-      // Conductor puede aceptar viaje disponible ('requested' -> 'accepted')
-      // o avanzar estados de su viaje asignado
       allow update: if isAuthenticated() && (
-        (resource.data.status == 'requested' && request.resource.data.status == 'accepted' && request.resource.data.driverId == request.auth.uid) ||
-        (resource.data.driverId == request.auth.uid)
+        isAcceptingRequest()
+        || isDecliningRequest()
+        || isExpiringRequest()
+        || isValidAssignedDriverTransition()
       );
 
-      allow delete: if false; // Registros de viaje auditables e inmutables ante borrado casual
+      allow delete: if false;
     }
 
-    // Colección: driverLocations
     match /driverLocations/{driverId} {
-      allow read: if isAuthenticated();
-      allow write: if isOwner(driverId);
+      allow read, write: if isOwner(driverId);
     }
 
-    // Colección: driverEarnings
     match /driverEarnings/{earningsId} {
-      // Cada conductor solo puede consultar sus propios registros de ganancias
+      function matchesCompletedTrip() {
+        let tripPath = /databases/$(database)/documents/trips/$(earningsId);
+        return exists(tripPath)
+          && get(tripPath).data.driverId == request.auth.uid
+          && get(tripPath).data.status in ['completed', 'paid']
+          && request.resource.data.tripId == earningsId
+          && request.resource.data.fare == get(tripPath).data.fare
+          && request.resource.data.commission == get(tripPath).data.commission
+          && request.resource.data.tip == get(tripPath).data.tip
+          && request.resource.data.paymentMethod == get(tripPath).data.paymentMethod
+          && request.resource.data.netEarnings
+            == request.resource.data.fare - request.resource.data.commission + request.resource.data.tip;
+      }
+
       allow read: if isAuthenticated() && resource.data.driverId == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.driverId == request.auth.uid;
-      allow update, delete: if false; // Liquidaciones financieras inmutables
+      allow create: if isAuthenticated()
+        && request.resource.data.keys().hasAll([
+          'id', 'driverId', 'tripId', 'fare', 'commission', 'tip',
+          'netEarnings', 'paymentMethod', 'createdAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'id', 'driverId', 'tripId', 'fare', 'commission', 'tip',
+          'netEarnings', 'paymentMethod', 'createdAt'
+        ])
+        && earningsId == request.resource.data.tripId
+        && request.resource.data.id == earningsId
+        && request.resource.data.driverId == request.auth.uid
+        && matchesCompletedTrip();
+      allow update, delete: if false;
     }
   }
 }
-

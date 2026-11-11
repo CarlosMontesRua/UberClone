@@ -5,13 +5,13 @@ import {
   getDoc,
   getDocs,
   updateDoc,
-  deleteDoc,
+  arrayUnion,
   query,
   where,
   orderBy,
   onSnapshot,
 } from 'firebase/firestore';
-import { getDb } from '../config/firebase';
+import { getDb, getFirebaseAuth } from '../config/firebase';
 
 const TRIPS = 'trips';
 export const COMMISSION_RATE = 0.20; // 20% de comisión de la plataforma
@@ -30,6 +30,9 @@ export const tripService = {
    */
   async createTrip(tripData) {
     const db = getDb();
+    const passengerId = getFirebaseAuth().currentUser?.uid;
+    if (!passengerId) throw new Error('Debes iniciar sesión para crear una solicitud de viaje.');
+
     const tripRef = doc(collection(db, TRIPS));
     const now = new Date();
     const nowIso = now.toISOString();
@@ -41,8 +44,9 @@ export const tripService = {
 
     const payload = {
       id: tripRef.id,
-      driverId: tripData.driverId || null,
-      passengerId: tripData.passengerId || 'pasajero_demo',
+      driverId: null,
+      passengerId,
+      passengerName: tripData.passengerName || 'Pasajero',
       origin: tripData.origin || { address: 'Origen no especificado', latitude: 4.6097, longitude: -74.0817 },
       destination: tripData.destination || { address: 'Destino no especificado', latitude: 4.6533, longitude: -74.0836 },
       distanceKm: Number(tripData.distanceKm) || 3.5,
@@ -57,6 +61,7 @@ export const tripService = {
       paymentStatus: tripData.paymentStatus || 'pending',
       paymentId: tripData.paymentId || `PAY-${Date.now()}`,
       status: 'requested',
+      declinedBy: [],
       rating: Number(tripData.rating) || 0,
       createdAt: nowIso,
       expiresAt: now.getTime() + REQUEST_EXPIRATION_SECONDS * 1000,
@@ -126,10 +131,26 @@ export const tripService = {
    */
   async rejectTrip(tripId, driverId) {
     const db = getDb();
-    await updateDoc(doc(db, TRIPS, tripId), {
-      status: 'cancelled',
-      cancelledBy: driverId,
-      updatedAt: new Date().toISOString(),
+    const tripRef = doc(db, TRIPS, tripId);
+    const now = new Date().toISOString();
+
+    if (driverId === 'expired') {
+      await updateDoc(tripRef, {
+        status: 'cancelled',
+        updatedAt: now,
+      });
+      return;
+    }
+
+    const currentUid = getFirebaseAuth().currentUser?.uid;
+    if (!driverId || driverId !== currentUid) {
+      throw new Error('Solo puedes rechazar solicitudes con tu propia sesión.');
+    }
+
+    // A driver's rejection must not cancel the request for every other driver.
+    await updateDoc(tripRef, {
+      declinedBy: arrayUnion(driverId),
+      updatedAt: now,
     });
   },
 
@@ -145,7 +166,7 @@ export const tripService = {
       ...additionalData,
     };
 
-    if (newStatus === 'completed' || newStatus === 'paid') {
+    if (newStatus === 'completed') {
       if (!updates.completedAt) {
         updates.completedAt = new Date().toISOString();
       }
@@ -171,7 +192,7 @@ export const tripService = {
    * Escucha solicitudes de viajes pendientes en tiempo real ('requested')
    * que no hayan expirado (> Date.now()).
    */
-  subscribeToAvailableRequests(category, callback) {
+  subscribeToAvailableRequests(category, callback, driverId) {
     const db = getDb();
     const q = query(
       collection(db, TRIPS),
@@ -189,7 +210,8 @@ export const tripService = {
             // Filtrar solicitudes con menos de 15 segundos
             const notExpired = !t.expiresAt || t.expiresAt > now;
             const matchesCategory = !category || t.category === category;
-            return notExpired && matchesCategory;
+            const notDeclined = !driverId || !t.declinedBy?.includes(driverId);
+            return notExpired && matchesCategory && notDeclined;
           });
         callback(available);
       },
@@ -206,7 +228,7 @@ export const tripService = {
   subscribeToActiveTripForDriver(driverId, callback) {
     if (!driverId) return () => {};
     const db = getDb();
-    const activeStatuses = ['accepted', 'driver_arriving', 'in_progress'];
+    const activeStatuses = ['accepted', 'driver_arriving', 'in_progress', 'completed'];
     const q = query(
       collection(db, TRIPS),
       where('driverId', '==', driverId),
@@ -253,10 +275,6 @@ export const tripService = {
     return trips;
   },
 
-  async deleteTrip(tripId) {
-    const db = getDb();
-    await deleteDoc(doc(db, TRIPS, tripId));
-  },
 };
 
 export default tripService;

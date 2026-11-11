@@ -117,7 +117,7 @@ export const TripHistoryScreen = () => {
               <View key={trip.id} style={styles.tripCard}>
                 <View style={styles.tripHeader}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.passengerText}>👤 {trip.passengerId || 'Pasajero'}</Text>
+                    <Text style={styles.passengerText}>👤 {trip.passengerName || trip.passengerId || 'Pasajero'}</Text>
                     <Text style={styles.tripDate}>
                       {trip.createdAt ? new Date(trip.createdAt).toLocaleString('es-CO') : ''}
                     </Text>

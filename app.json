@@ -32,6 +32,14 @@
           "cameraPermission": "Permite a UberClone usar la cámara para la foto de perfil y del vehículo.",
           "microphonePermission": false
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Permite a UberClone rastrear tu ubicación para recibir viajes cercanos y navegar a los destinos.",
+          "locationWhenInUsePermission": "Permite a UberClone mostrar tu ubicación en el mapa mientras estás conduciendo.",
+          "isAndroidBackgroundLocationEnabled": false
+        }
       ]
     ]
   }

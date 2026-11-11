@@ -2,17 +2,18 @@ import { ActivityIndicator, StyleSheet, Text, View, Pressable } from 'react-nati
 import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
-import { colors, radii, spacing, typography } from '../theme/theme';
+import { colors, spacing, typography } from '../theme/theme';
 import { RegistrationProvider } from '../context/RegistrationContext';
 import { AuthProvider } from '../context/AuthContext';
 import { useRegistration } from '../hooks/useRegistration';
+import { RegisterScreen } from '../screens/RegisterScreen';
 import { DocumentsScreen } from '../screens/DocumentsScreen';
 import { PersonalDataScreen } from '../screens/PersonalDataScreen';
 import { VehicleScreen } from '../screens/VehicleScreen';
-import { DriverDashboardScreen } from '../screens/DriverDashboardScreen';
+import { HomeScreen } from '../screens/HomeScreen';
 import { EarningsScreen } from '../screens/EarningsScreen';
 import { TripHistoryScreen } from '../screens/TripHistoryScreen';
-import { validateDocuments, validatePersonalData, validateVehicle } from '../utils/validations';
+import { validateDocuments, validatePersonalData, validateRegister, validateVehicle } from '../utils/validations';
 
 const Tab = createBottomTabNavigator();
 
@@ -61,6 +62,15 @@ const RegistrationTabs = () => {
     );
   }
 
+  const isAccountValid = Object.keys(
+    validateRegister({
+      email: registrationData.email,
+      phone: registrationData.phone,
+      password: registrationData.password,
+      confirmPassword: registrationData.confirmPassword,
+      acceptTerms: registrationData.acceptTerms,
+    }),
+  ).length === 0;
   const isPersonalValid = Object.keys(validatePersonalData(registrationData)).length === 0;
   const isVehicleValid =
     isPersonalValid && Object.keys(validateVehicle(registrationData)).length === 0;
@@ -79,7 +89,7 @@ const RegistrationTabs = () => {
 
       <Tab.Navigator
         key={resetVersion}
-        initialRouteName="PersonalData"
+        initialRouteName="Register"
         backBehavior="initialRoute"
         screenOptions={{
           headerShown: false,
@@ -102,12 +112,22 @@ const RegistrationTabs = () => {
         }}
       >
         <Tab.Screen
+          name="Register"
+          component={RegisterScreen}
+          options={{
+            title: 'Cuenta',
+            tabBarIcon: ({ focused }) => (
+              <TabIcon step={1} active={focused} completed={isAccountValid} />
+            ),
+          }}
+        />
+        <Tab.Screen
           name="PersonalData"
           component={PersonalDataScreen}
           options={{
             title: 'Datos personales',
             tabBarIcon: ({ focused }) => (
-              <TabIcon step={1} active={focused} completed={isPersonalValid} />
+              <TabIcon step={2} active={focused} completed={isPersonalValid} />
             ),
           }}
         />
@@ -117,7 +137,7 @@ const RegistrationTabs = () => {
           options={{
             title: 'Vehículo',
             tabBarIcon: ({ focused }) => (
-              <TabIcon step={2} active={focused} completed={isVehicleValid} />
+              <TabIcon step={3} active={focused} completed={isVehicleValid} />
             ),
           }}
         />
@@ -127,7 +147,7 @@ const RegistrationTabs = () => {
           options={{
             title: 'Documentos',
             tabBarIcon: ({ focused }) => (
-              <TabIcon step={3} active={focused} completed={isDocumentsValid} />
+              <TabIcon step={4} active={focused} completed={isDocumentsValid} />
             ),
           }}
         />
@@ -162,9 +182,9 @@ const DriverAppTabs = () => {
     >
       <Tab.Screen
         name="Conducir"
-        component={DriverDashboardScreen}
+        component={HomeScreen}
         options={{
-          title: 'Conducir',
+          title: 'Inicio',
           tabBarIcon: ({ focused }) => <TabIcon symbol="🚗" active={focused} />,
         }}
       />

@@ -128,7 +128,7 @@ export const VehicleScreen = ({ navigation }) => {
             <View style={[commonStyles.progressFill, commonStyles.progressHalf]} />
           </View>
 
-          <Text style={commonStyles.step}>Paso 2 de 3</Text>
+          <Text style={commonStyles.step}>Paso 3 de 4</Text>
           <Text style={commonStyles.title}>Tu vehículo</Text>
           <Text style={commonStyles.subtitle}>
             Registra los datos del vehículo con el que prestarás el servicio.

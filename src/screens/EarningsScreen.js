@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   ActivityIndicator,
-  FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, commonStyles, radii, spacing, typography } from '../theme/theme';
@@ -27,10 +26,7 @@ export const EarningsScreen = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!activeDriverId) {
-      setLoading(false);
-      return;
-    }
+    if (!activeDriverId) return;
 
     const unsubscribe = earningsService.subscribeToEarnings(activeDriverId, (data) => {
       setEarningsData(data);
@@ -40,7 +36,7 @@ export const EarningsScreen = () => {
     return () => unsubscribe();
   }, [activeDriverId]);
 
-  if (loading) {
+  if (loading && activeDriverId) {
     return (
       <View style={commonStyles.center}>
         <ActivityIndicator size="large" color={colors.primary} />
@@ -112,7 +108,7 @@ export const EarningsScreen = () => {
           <View style={styles.emptyCard}>
             <Text style={styles.emptyText}>Aún no tienes viajes completados registrados.</Text>
             <Text style={styles.emptySub}>
-              Cuando completes viajes en la pestaña "Conducir", aquí aparecerá el desglose en tiempo real.
+              Cuando completes viajes en la pestaña &ldquo;Conducir&rdquo;, aquí aparecerá el desglose en tiempo real.
             </Text>
           </View>
         ) : (

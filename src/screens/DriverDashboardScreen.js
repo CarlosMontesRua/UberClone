@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -49,10 +49,7 @@ export const DriverDashboardScreen = ({ navigation }) => {
 
   // 1. Suscripción en tiempo real al perfil del conductor
   useEffect(() => {
-    if (!activeDriverId) {
-      setLoading(false);
-      return;
-    }
+    if (!activeDriverId) return;
 
     const unsubscribe = driverService.subscribeToDriver(activeDriverId, (data) => {
       setDriver(data);
@@ -86,11 +83,7 @@ export const DriverDashboardScreen = ({ navigation }) => {
 
   // 4. Suscripción a solicitudes entrantes en tiempo real ('requested')
   useEffect(() => {
-    const isAvailable = driver?.availability === 'available';
-    if (!isAvailable || activeTrip) {
-      setAvailableRequests([]);
-      return;
-    }
+    if (driver?.availability !== 'available' || activeTrip || !activeDriverId) return;
 
     const unsubscribe = tripService.subscribeToAvailableRequests(
       null,
@@ -99,14 +92,16 @@ export const DriverDashboardScreen = ({ navigation }) => {
     );
 
     return () => unsubscribe();
-  }, [driver?.availability, activeTrip]);
+  }, [driver?.availability, activeTrip, activeDriverId]);
 
   // 5. Temporizador regresivo de 15 segundos para la solicitud activa
-  const currentRequest = availableRequests.length > 0 ? availableRequests[0] : null;
+  const currentRequest =
+    driver?.availability === 'available' && !activeTrip && availableRequests.length > 0
+      ? availableRequests[0]
+      : null;
 
   useEffect(() => {
     if (!currentRequest) {
-      setTimeLeft(15);
       if (timerRef.current) clearInterval(timerRef.current);
       return;
     }
@@ -289,7 +284,7 @@ export const DriverDashboardScreen = ({ navigation }) => {
     ]);
   };
 
-  if (loading) {
+  if (loading && activeDriverId) {
     return (
       <View style={commonStyles.center}>
         <ActivityIndicator size="large" color={colors.primary} />

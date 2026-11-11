@@ -1,6 +1,5 @@
 import { useCallback, useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -70,10 +69,8 @@ export const VehicleScreen = ({ navigation }) => {
     values,
     errors,
     isValid,
-    submitting,
     setFieldValue,
     markFieldTouched,
-    setFormError,
     validateForm,
   } = useRegistrationForm(
     getVehicleValues(registrationData),

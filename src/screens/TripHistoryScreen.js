@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -36,33 +36,35 @@ export const TripHistoryScreen = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeFilter, setActiveFilter] = useState('all');
-
-  const loadTrips = useCallback(async () => {
-    if (!activeDriverId) {
-      setLoading(false);
-      return;
-    }
-    try {
-      const data = await tripService.getTripHistory(activeDriverId, {
-        status: activeFilter,
-      });
-      setTrips(data);
-    } catch (err) {
-      console.warn('Error cargando historial de viajes:', err);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [activeDriverId, activeFilter]);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
-    setLoading(true);
-    loadTrips();
-  }, [loadTrips]);
+    if (!activeDriverId) return undefined;
+
+    let cancelled = false;
+    tripService
+      .getTripHistory(activeDriverId, { status: activeFilter })
+      .then((data) => {
+        if (!cancelled) setTrips(data);
+      })
+      .catch((err) => {
+        if (!cancelled) console.warn('Error cargando historial de viajes:', err);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeDriverId, activeFilter, reloadKey]);
 
   const onRefresh = () => {
     setRefreshing(true);
-    loadTrips();
+    setReloadKey((key) => key + 1);
   };
 
   return (
@@ -85,7 +87,11 @@ export const TripHistoryScreen = () => {
             return (
               <Pressable
                 key={f.key}
-                onPress={() => setActiveFilter(f.key)}
+                onPress={() => {
+                  if (f.key === activeFilter) return;
+                  setLoading(true);
+                  setActiveFilter(f.key);
+                }}
                 style={[styles.filterChip, isActive && styles.filterChipActive]}
               >
                 <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>
@@ -96,7 +102,7 @@ export const TripHistoryScreen = () => {
           })}
         </View>
 
-        {loading ? (
+        {loading && activeDriverId ? (
           <View style={styles.centerBox}>
             <ActivityIndicator color={colors.primary} />
             <Text style={{ marginTop: spacing.sm, color: colors.textMuted }}>Cargando viajes...</Text>

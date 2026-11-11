@@ -83,10 +83,17 @@ export const documentService = {
 
   subscribeToDocument(documentId, callback) {
     const db = getDb();
-    return onSnapshot(doc(db, DOCUMENTS, documentId), (snap) => {
-      if (snap.exists()) callback({ id: snap.id, ...snap.data() });
-      else callback(null);
-    });
+    return onSnapshot(
+      doc(db, DOCUMENTS, documentId),
+      (snap) => {
+        if (snap.exists()) callback({ id: snap.id, ...snap.data() });
+        else callback(null);
+      },
+      (error) => {
+        console.warn('Document snapshot listener notice:', error.message);
+        callback(null);
+      },
+    );
   },
 
   subscribeToDocumentsByDriverId(driverId, callback) {
@@ -97,9 +104,16 @@ export const documentService = {
       where('driverId', '==', driverId),
       orderBy('createdAt', 'desc'),
     );
-    return onSnapshot(q, (snap) => {
-      callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
+    return onSnapshot(
+      q,
+      (snap) => {
+        callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      },
+      (error) => {
+        console.warn('Documents list snapshot listener notice:', error.message);
+        callback([]);
+      },
+    );
   },
 };
 

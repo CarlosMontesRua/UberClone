@@ -98,13 +98,20 @@ export const driverService = {
   subscribeToDriver(driverId, callback) {
     if (!driverId) return () => {};
     const db = getDb();
-    return onSnapshot(doc(db, DRIVERS, driverId), (snap) => {
-      if (snap.exists()) {
-        callback({ id: snap.id, ...snap.data() });
-      } else {
+    return onSnapshot(
+      doc(db, DRIVERS, driverId),
+      (snap) => {
+        if (snap.exists()) {
+          callback({ id: snap.id, ...snap.data() });
+        } else {
+          callback(null);
+        }
+      },
+      (error) => {
+        console.warn('Driver snapshot listener notice:', error.message);
         callback(null);
-      }
-    });
+      },
+    );
   },
 
   async getAllDrivers() {

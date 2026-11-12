@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,17 +8,23 @@ import {
   Alert,
   ActivityIndicator,
   Pressable,
+  Platform,
+  Image,
 } from 'react-native';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppButton } from '../components/AppButton';
 import { colors, commonStyles, radii, spacing, typography } from '../theme/theme';
 import { useRegistration } from '../hooks/useRegistration';
+import { useDriverLocation } from '../hooks/useDriverLocation';
+import { useTripRoute } from '../hooks/useTripRoute';
 import { driverService } from '../services/driverService';
 import { tripService } from '../services/tripService';
-import { locationService } from '../services/locationService';
 import { earningsService } from '../services/earningsService';
 import { doc, updateDoc } from 'firebase/firestore';
 import { getDb } from '../config/firebase';
+
+const CAR_MARKER = require('../../assets/car-marker.png');
 
 const STATUS_LABELS = {
   pending: { label: 'En revisión (Pendiente)', color: colors.warning || '#D97706', bg: '#FEF3C7' },
@@ -43,9 +49,28 @@ export const DriverDashboardScreen = ({ navigation }) => {
   const [updatingAvailability, setUpdatingAvailability] = useState(false);
   const [activeTrip, setActiveTrip] = useState(null);
   const [availableRequests, setAvailableRequests] = useState([]);
-  const [driverLocation, setDriverLocation] = useState(null);
   const [timeLeft, setTimeLeft] = useState(15);
   const timerRef = useRef(null);
+  const mapRef = useRef(null);
+
+  const isAvailable = driver?.availability === 'available';
+  const {
+    location: driverLocation,
+    error: locationError,
+    loading: locationLoading,
+    permissionStatus,
+    requestPermission,
+  } = useDriverLocation({
+    driverId: activeDriverId,
+    tracking: Boolean(activeDriverId && isAvailable),
+  });
+
+  const {
+    coordinates: routeCoordinates,
+    meta: routeMeta,
+    error: routeError,
+    loading: routeLoading,
+  } = useTripRoute({ trip: activeTrip, driverLocation });
 
   // 1. Suscripción en tiempo real al perfil del conductor
   useEffect(() => {
@@ -62,18 +87,31 @@ export const DriverDashboardScreen = ({ navigation }) => {
     return () => unsubscribe();
   }, [activeDriverId]);
 
-  // 2. Suscripción en tiempo real a la ubicación del conductor
+  // Centrar mapa: ruta completa si hay viaje; si no, GPS del carro
   useEffect(() => {
-    if (!activeDriverId) return;
+    if (!mapRef.current) return;
 
-    const unsubscribe = locationService.subscribeToDriverLocation(activeDriverId, (loc) => {
-      setDriverLocation(loc);
-    });
+    if (routeCoordinates.length > 1) {
+      mapRef.current.fitToCoordinates(routeCoordinates, {
+        edgePadding: { top: 48, right: 48, bottom: 48, left: 48 },
+        animated: true,
+      });
+      return;
+    }
 
-    return () => unsubscribe();
-  }, [activeDriverId]);
+    if (!driverLocation) return;
+    mapRef.current.animateToRegion(
+      {
+        latitude: driverLocation.latitude,
+        longitude: driverLocation.longitude,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      },
+      500,
+    );
+  }, [routeCoordinates, driverLocation?.latitude, driverLocation?.longitude]);
 
-  // 3. Suscripción en tiempo real al viaje activo
+  // 2. Suscripción en tiempo real al viaje activo
   useEffect(() => {
     if (!activeDriverId) return;
 
@@ -84,9 +122,8 @@ export const DriverDashboardScreen = ({ navigation }) => {
     return () => unsubscribe();
   }, [activeDriverId]);
 
-  // 4. Suscripción a solicitudes entrantes en tiempo real ('requested')
+  // 3. Suscripción a solicitudes entrantes en tiempo real ('requested')
   useEffect(() => {
-    const isAvailable = driver?.availability === 'available';
     if (!isAvailable || activeTrip) {
       setAvailableRequests([]);
       return;
@@ -97,7 +134,7 @@ export const DriverDashboardScreen = ({ navigation }) => {
     });
 
     return () => unsubscribe();
-  }, [driver?.availability, activeTrip]);
+  }, [isAvailable, activeTrip]);
 
   // 5. Temporizador regresivo de 15 segundos para la solicitud activa
   const currentRequest = availableRequests.length > 0 ? availableRequests[0] : null;
@@ -145,6 +182,11 @@ export const DriverDashboardScreen = ({ navigation }) => {
       return;
     }
 
+    if (newVal) {
+      const granted = await requestPermission();
+      if (!granted) return;
+    }
+
     setUpdatingAvailability(true);
     try {
       await driverService.setAvailability(activeDriverId, newVal ? 'available' : 'unavailable');
@@ -169,25 +211,6 @@ export const DriverDashboardScreen = ({ navigation }) => {
       Alert.alert('Estado actualizado (Pruebas)', `El estado del conductor ahora es: ${nextStatus}`);
     } catch (err) {
       Alert.alert('Error', err.message);
-    }
-  };
-
-  // Actualizar ubicación del conductor
-  const handleUpdateLocation = async () => {
-    if (!activeDriverId) return;
-    // Generar coordenadas ligeramente desplazadas alrededor de Bogotá para simular GPS real
-    const baseLat = 4.6097;
-    const baseLng = -74.0817;
-    const randomOffset = (Math.random() - 0.5) * 0.02;
-
-    try {
-      await locationService.updateDriverLocation(activeDriverId, {
-        latitude: parseFloat((baseLat + randomOffset).toFixed(6)),
-        longitude: parseFloat((baseLng + randomOffset).toFixed(6)),
-      });
-      Alert.alert('Ubicación actualizada', 'Se guardaron las nuevas coordenadas en driverLocations.');
-    } catch (err) {
-      Alert.alert('Error actualizando ubicación', err.message);
     }
   };
 
@@ -355,19 +378,121 @@ export const DriverDashboardScreen = ({ navigation }) => {
           </Pressable>
         </View>
 
-        {/* Ubicación en tiempo real */}
-        <View style={styles.card}>
+        {/* Mapa: carro + ruta real (recogida / destino) */}
+        <View style={styles.mapCard}>
           <View style={styles.rowBetween}>
-            <Text style={styles.cardTitle}>Ubicación en tiempo real</Text>
-            <Pressable onPress={handleUpdateLocation} style={styles.linkButton}>
-              <Text style={styles.linkButtonText}>Actualizar GPS</Text>
-            </Pressable>
+            <Text style={styles.cardTitle}>Mapa</Text>
+            <Text style={styles.locationSub}>
+              {routeLoading
+                ? 'Calculando ruta...'
+                : routeMeta?.label
+                  ? routeMeta.label
+                  : isAvailable
+                    ? locationLoading
+                      ? 'Activando GPS...'
+                      : 'GPS activo → Firestore'
+                    : 'Mapa listo (GPS al poner Disponible)'}
+            </Text>
           </View>
+
+          {routeMeta?.durationMin != null ? (
+            <Text style={styles.routeMetaText}>
+              {routeMeta.distanceKm?.toFixed(1)} km · {routeMeta.durationMin} min ·{' '}
+              {routeMeta.mode === 'pickup' ? 'Hacia el pasajero' : 'Hacia el destino'}
+            </Text>
+          ) : null}
+
+          {isAvailable && permissionStatus === 'denied' ? (
+            <View style={styles.permissionBox}>
+              <Text style={styles.warningText}>
+                Para estar Disponible hace falta permiso de ubicación.
+              </Text>
+              <AppButton title="Permitir ubicación" onPress={requestPermission} style={{ marginTop: spacing.sm }} />
+            </View>
+          ) : null}
+
+          {isAvailable && locationError ? (
+            <Text style={[styles.warningText, { marginBottom: spacing.sm }]}>{locationError}</Text>
+          ) : null}
+
+          {routeError ? (
+            <Text style={[styles.warningText, { marginBottom: spacing.sm }]}>
+              Ruta: {routeError}
+            </Text>
+          ) : null}
+
+          <View style={styles.mapContainer}>
+            <MapView
+              ref={mapRef}
+              style={styles.map}
+              provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
+              mapType="standard"
+              showsUserLocation={false}
+              showsMyLocationButton={false}
+              initialRegion={{
+                latitude: driverLocation?.latitude ?? 4.6097,
+                longitude: driverLocation?.longitude ?? -74.0817,
+                latitudeDelta: 0.05,
+                longitudeDelta: 0.05,
+              }}
+            >
+              {driverLocation ? (
+                <Marker
+                  coordinate={{
+                    latitude: driverLocation.latitude,
+                    longitude: driverLocation.longitude,
+                  }}
+                  title="Conductor"
+                  anchor={{ x: 0.5, y: 0.5 }}
+                  flat
+                  tracksViewChanges={false}
+                >
+                  <View style={styles.carMarker}>
+                    <Image source={CAR_MARKER} style={styles.carImage} resizeMode="contain" />
+                  </View>
+                </Marker>
+              ) : null}
+
+              {activeTrip?.origin?.latitude ? (
+                <Marker
+                  coordinate={{
+                    latitude: Number(activeTrip.origin.latitude),
+                    longitude: Number(activeTrip.origin.longitude),
+                  }}
+                  title="Recogida"
+                  description={activeTrip.origin.address}
+                  pinColor="#16A34A"
+                />
+              ) : null}
+
+              {activeTrip?.destination?.latitude &&
+              (activeTrip.status === 'in_progress' ||
+                activeTrip.status === 'accepted' ||
+                activeTrip.status === 'driver_arriving') ? (
+                <Marker
+                  coordinate={{
+                    latitude: Number(activeTrip.destination.latitude),
+                    longitude: Number(activeTrip.destination.longitude),
+                  }}
+                  title="Destino"
+                  description={activeTrip.destination.address}
+                  pinColor="#DC2626"
+                />
+              ) : null}
+
+              {routeCoordinates.length > 1 ? (
+                <Polyline
+                  coordinates={routeCoordinates}
+                  strokeColor={routeMeta?.mode === 'dropoff' ? '#2563EB' : '#0E9F6E'}
+                  strokeWidth={5}
+                />
+              ) : null}
+            </MapView>
+          </View>
+
           <Text style={styles.locationText}>
-            Lat: {driverLocation?.latitude ?? 4.60971} | Lng: {driverLocation?.longitude ?? -74.08175}
-          </Text>
-          <Text style={styles.locationSub}>
-            Última sync: {driverLocation?.updatedAt ? new Date(driverLocation.updatedAt).toLocaleTimeString() : 'Automática'}
+            Lat: {driverLocation?.latitude?.toFixed(6) ?? '—'} | Lng:{' '}
+            {driverLocation?.longitude?.toFixed(6) ?? '—'}
           </Text>
         </View>
 
@@ -447,10 +572,10 @@ export const DriverDashboardScreen = ({ navigation }) => {
 
             <View style={styles.activeTripActions}>
               {activeTrip.status === 'accepted' ? (
-                <AppButton title="Llegué al punto de encuentro" onPress={handleAdvanceTripStatus} />
+                <AppButton title="Voy a recoger al pasajero" onPress={handleAdvanceTripStatus} />
               ) : null}
               {activeTrip.status === 'driver_arriving' ? (
-                <AppButton title="Iniciar viaje con pasajero" onPress={handleAdvanceTripStatus} />
+                <AppButton title="Pasajero a bordo" onPress={handleAdvanceTripStatus} />
               ) : null}
               {activeTrip.status === 'in_progress' ? (
                 <AppButton title="Finalizar viaje y liquidar" onPress={handleAdvanceTripStatus} />
@@ -586,13 +711,37 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  linkButton: {
-    padding: spacing.xs,
+  mapCard: {
+    backgroundColor: colors.surface,
+    padding: spacing.lg,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.md,
   },
-  linkButtonText: {
-    ...typography.caption,
-    color: colors.accent,
-    fontWeight: '700',
+  mapContainer: {
+    height: 280,
+    borderRadius: radii.md,
+    overflow: 'hidden',
+    marginTop: spacing.sm,
+    backgroundColor: '#E5E7EB',
+  },
+  map: {
+    width: '100%',
+    height: '100%',
+  },
+  mapPlaceholder: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+  },
+  permissionBox: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+    padding: spacing.sm,
+    backgroundColor: '#FEF3C7',
+    borderRadius: radii.sm,
   },
   locationText: {
     ...typography.body,
@@ -603,6 +752,22 @@ const styles = StyleSheet.create({
   locationSub: {
     ...typography.caption,
     color: colors.textMuted,
+  },
+  routeMetaText: {
+    ...typography.caption,
+    color: colors.accent,
+    fontWeight: '700',
+    marginTop: spacing.xs,
+  },
+  carMarker: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  carImage: {
+    width: 40,
+    height: 40,
   },
   requestCard: {
     backgroundColor: '#FFFBEB',

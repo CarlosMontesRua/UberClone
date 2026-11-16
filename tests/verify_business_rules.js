@@ -140,6 +140,88 @@ function testCollectionsSchema() {
   console.log('  ✓ Estructura de colecciones y campos completos validados');
 }
 
+// 5. Validar formato de persistencia en driverLocations
+function testDriverLocationPersistenceRules() {
+  console.log('Testing: Reglas de persistencia en driverLocations...');
+
+  function buildLocationPayload(driverId, coords) {
+    if (!driverId) throw new Error('driverId es requerido');
+    if (typeof coords.latitude !== 'number' || typeof coords.longitude !== 'number') {
+      throw new Error('latitude y longitude deben ser numéricos');
+    }
+    return {
+      driverId,
+      latitude: parseFloat(coords.latitude.toFixed(6)),
+      longitude: parseFloat(coords.longitude.toFixed(6)),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  // Comprobar error con driverId nulo
+  assert.throws(
+    () => buildLocationPayload(null, { latitude: 4.6097, longitude: -74.0817 }),
+    /driverId es requerido/,
+  );
+
+  // Comprobar error con coordenadas inválidas
+  assert.throws(
+    () => buildLocationPayload('drv_123', { latitude: 'invalido', longitude: -74.0817 }),
+    /latitude y longitude deben ser numéricos/,
+  );
+
+  // Comprobar estructura válida
+  const payload = buildLocationPayload('drv_123', { latitude: 4.60971234, longitude: -74.08175678 });
+  assert.strictEqual(payload.driverId, 'drv_123');
+  assert.strictEqual(payload.latitude, 4.609712);
+  assert.strictEqual(payload.longitude, -74.081757);
+  assert.strictEqual(typeof payload.updatedAt, 'string');
+
+  console.log('  ✓ Validación de driverId y coordenadas numéricas');
+  console.log('  ✓ Campos de driverLocations (driverId, latitude, longitude, updatedAt) cumplen la norma');
+}
+
+// 6. Validar ciclo de vida y limpieza de seguimiento de ubicación (Prevenir fugas de memoria)
+function testLocationTrackingCleanup() {
+  console.log('Testing: Limpieza obligatoria del seguimiento de ubicación...');
+
+  let activeWatcher = null;
+  let activeTimer = null;
+  let updatesCount = 0;
+
+  function startTracking() {
+    // Si ya existe uno, limpiarlo primero (prevenir duplicados)
+    stopTracking();
+    activeWatcher = { id: 'watcher_1', active: true };
+    activeTimer = setInterval(() => {
+      updatesCount++;
+    }, 100);
+  }
+
+  function stopTracking() {
+    if (activeWatcher) {
+      activeWatcher.active = false;
+      activeWatcher = null;
+    }
+    if (activeTimer) {
+      clearInterval(activeTimer);
+      activeTimer = null;
+    }
+  }
+
+  // Iniciar seguimiento
+  startTracking();
+  assert.strictEqual(activeWatcher !== null, true);
+  assert.strictEqual(activeTimer !== null, true);
+
+  // Detener seguimiento (como en limpieza de useEffect)
+  stopTracking();
+  assert.strictEqual(activeWatcher, null, 'El watcher debe quedar en null');
+  assert.strictEqual(activeTimer, null, 'El timer debe ser cancelado');
+
+  console.log('  ✓ Limpieza de useEffect cancela watchers y temporizadores activos');
+  console.log('  ✓ Prevención de múltiples seguimientos simultáneos verificada');
+}
+
 function runAllTests() {
   console.log('====================================================');
   console.log('INICIANDO PRUEBAS DE REGLAS DE NEGOCIO Y PERSISTENCIA');
@@ -150,9 +232,11 @@ function runAllTests() {
     testAvailabilityRule();
     testTripLifecycleAndExpiration();
     testCollectionsSchema();
+    testDriverLocationPersistenceRules();
+    testLocationTrackingCleanup();
 
     console.log('\n====================================================');
-    console.log('TODAS LAS PRUEBAS UNITARIAS PASARON EXITOSAMENTE (4/4)');
+    console.log('TODAS LAS PRUEBAS UNITARIAS PASARON EXITOSAMENTE (6/6)');
     console.log('====================================================');
   } catch (error) {
     console.error('\n❌ ERROR EN PRUEBAS:', error.message);

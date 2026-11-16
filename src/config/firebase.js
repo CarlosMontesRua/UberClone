@@ -9,6 +9,9 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
+// Expo replaces these EXPO_PUBLIC_* references at bundle time. Firebase's web
+// configuration identifies the project; authorization is enforced by Auth and
+// Firestore Security Rules, never by keeping this client config secret.
 const firebaseConfig = {
   apiKey:
     process.env.EXPO_PUBLIC_FIREBASE_API_KEY ||
@@ -39,16 +42,41 @@ const firebaseConfig = {
     'G-T21K9VQX2Y',
 };
 
+const configLabels = {
+  apiKey: 'EXPO_PUBLIC_FIREBASE_API_KEY',
+  authDomain: 'EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN',
+  projectId: 'EXPO_PUBLIC_FIREBASE_PROJECT_ID',
+  storageBucket: 'EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET',
+  messagingSenderId: 'EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID',
+  appId: 'EXPO_PUBLIC_FIREBASE_APP_ID',
+  measurementId: 'EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID',
+};
+
+const isPlaceholder = (value) =>
+  !value || /^(your-|YOUR_|tu-proyecto|\.\.\.)/i.test(value.trim());
+
+export const getMissingFirebaseConfig = () =>
+  Object.entries(firebaseConfig)
+    .filter(([, value]) => isPlaceholder(value))
+    .map(([key]) => configLabels[key]);
+
+export const isFirebaseConfigured = () => getMissingFirebaseConfig().length === 0;
+
 let app;
 let db;
 let auth;
 let storage;
 
 export const initFirebase = () => {
-  if (!getApps().length) {
-    app = initializeApp(firebaseConfig);
-  } else {
-    app = getApp();
+  const missing = getMissingFirebaseConfig();
+  if (missing.length) {
+    throw new Error(
+      `Firebase no está configurado. Completa estas variables en .env: ${missing.join(', ')}`,
+    );
+  }
+
+  if (!app) {
+    app = getApps().length ? getApp() : initializeApp(firebaseConfig);
   }
 
   if (!db) {
@@ -69,6 +97,7 @@ export const initFirebase = () => {
         auth = getAuth(app);
       }
     } catch {
+      // Reuse Auth when it was initialized elsewhere during hot reload.
       auth = getAuth(app);
     }
   }
@@ -76,8 +105,11 @@ export const initFirebase = () => {
   return { app, db, auth, storage };
 };
 
-// Initialize default instance
-initFirebase();
+// Avoid creating a Firebase app with sample IDs. App.js shows setup guidance
+// until the real Firebase web app configuration is available.
+if (isFirebaseConfigured()) {
+  initFirebase();
+}
 
 export const getDb = () => {
   if (!db) initFirebase();
@@ -105,4 +137,6 @@ export default {
   getFirebaseAuth,
   getFirebaseApp,
   getFirebaseStorage,
+  getMissingFirebaseConfig,
+  isFirebaseConfigured,
 };

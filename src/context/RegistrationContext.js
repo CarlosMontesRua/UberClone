@@ -157,29 +157,23 @@ export const RegistrationProvider = ({ children }) => {
     // 1. Obtener o crear ID de autenticación
     let driverId = authService.getCurrentUser()?.uid;
 
-    if (!driverId && data.email) {
-      const passwordToUse =
-        data.password && data.password.length >= 8
-          ? data.password
-          : `Uber.${data.documentNumber || '123456'}!`;
+    if (!driverId) {
+      if (!data.email || !data.password || data.password.length < 8) {
+        throw new Error('Se requiere un correo y una contraseña válidos para registrar el conductor.');
+      }
 
       try {
-        const user = await authService.register(data.email, passwordToUse);
+        const user = await authService.register(data.email, data.password);
         driverId = user.uid;
-      } catch (authError) {
-        if (authError.code === 'auth/email-already-in-use') {
-          try {
-            const user = await authService.login(data.email, passwordToUse);
-            driverId = user.uid;
-          } catch {
-            driverId = 'driver_' + (data.documentNumber || Date.now());
-          }
-        } else {
-          driverId = 'driver_' + (data.documentNumber || Date.now());
+      } catch (registerError) {
+        // Reuse an existing account only when Firebase reports that the email
+        // is already registered; never invent a UID that Firestore rules reject.
+        if (registerError.code !== 'auth/email-already-in-use') {
+          throw registerError;
         }
+        const user = await authService.login(data.email, data.password);
+        driverId = user.uid;
       }
-    } else if (!driverId) {
-      driverId = 'driver_' + (data.documentNumber || Date.now());
     }
 
     // 2. Guardar en Colección drivers

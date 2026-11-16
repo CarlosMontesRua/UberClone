@@ -58,7 +58,7 @@ export const RegisterScreen = ({ navigation }) => {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <Text style={commonStyles.step}>Paso 1 de 3</Text>
+          <Text style={commonStyles.step}>Paso 1 de 4</Text>
           <Text style={commonStyles.title}>Crea tu cuenta</Text>
           <Text style={commonStyles.subtitle}>
             Regístrate como conductor y empieza a recibir viajes con UberClone.

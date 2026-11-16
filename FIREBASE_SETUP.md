@@ -1,162 +1,67 @@
+# Configuración de Firebase para UberClone
 
-## 1. Configuración de Firebase
+## 1. Crear y preparar el proyecto
 
-### Paso 1: Crear el proyecto en Firebase Console
-1. Ingresa a [Firebase Console](https://console.firebase.google.com/).
-2. Haz clic en **"Agregar proyecto"** y asígnale un nombre (ej. `uberclone-driver`).
-3. En la sección **Compilación (Build)**:
-   * **Authentication:** Habilita el proveedor de acceso **Correo electrónico / Contraseña**.
-   * **Firestore Database:** Crea una base de datos en modo producción (o prueba para desarrollo) seleccionando una región cercana (ej. `us-central1` o `southamerica-east1`).
+En [Firebase Console](https://console.firebase.google.com/):
 
-### Paso 2: Obtener las Credenciales
-1. Ve a **Configuración del proyecto** (ícono de engranaje) $\rightarrow$ **General**.
-2. En la sección "Tus apps", crea una aplicación **Web** (`</>`).
-3. Copia el objeto de configuración generado.
+1. Crea o selecciona el proyecto de UberClone.
+2. La configuración del proyecto habilita **Correo electrónico/Contraseña** durante el despliegue de Firebase CLI.
+3. En **Firestore Database**, crea la base de datos `(default)` en modo producción. Para Bogotá puedes elegir `southamerica-east1`; la región no se puede cambiar después.
+4. En **Configuración del proyecto → General → Tus apps**, registra una app web y copia sus seis valores de configuración.
 
-### Paso 3: Configurar Variables de Entorno
-Crea un archivo `.env` en la raíz del proyecto basándote en el archivo [.env.example](file:///c:/Users/luisb/OneDrive/Escritorio/final%20movil/UberClone/.env.example):
+Firestore no requiere crear las colecciones manualmente: aparecen cuando la app guarda su primer documento. La creación de la base `(default)` sí se hace desde Firebase Console.
+
+## 2. Conectar la app
+
+Copia `.env.example` como `.env` en la raíz y completa los valores de tu app web:
 
 ```env
-EXPO_PUBLIC_FIREBASE_API_KEY=AIzaSy...
-EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=tu-proyecto.firebaseapp.com
-EXPO_PUBLIC_FIREBASE_PROJECT_ID=tu-proyecto-id
-EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=tu-proyecto-id.appspot.com
-EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=123456789012
-EXPO_PUBLIC_FIREBASE_APP_ID=1:123456789012:web:abcdef...
+EXPO_PUBLIC_FIREBASE_API_KEY=...
+EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=your-project-id.firebaseapp.com
+EXPO_PUBLIC_FIREBASE_PROJECT_ID=your-project-id
+EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=your-project-id.firebasestorage.app
+EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=...
+EXPO_PUBLIC_FIREBASE_APP_ID=...
 ```
 
----
-
-## 2. Estructura de la Base de Datos (Colecciones Firestore)
-
-### 1. `drivers`
-* `id` *(String)*: UID del conductor.
-* `fullName` *(String)*: Nombre completo.
-* `documentNumber` *(String)*: Documento de identidad.
-* `phone` *(String)*: Celular.
-* `birthDate` *(String, YYYY-MM-DD)*: Fecha de nacimiento.
-* `gender` *(String)*: Género.
-* `email` *(String)*: Correo electrónico.
-* `profilePhoto` *(String)*: URI/URL de foto de perfil.
-* `language` *(String)*: Idioma ('es' | 'en').
-* `status` *(String)*: `'pending'` | `'approved'` | `'rejected'` *(Inicia en `'pending'`)*.
-* `availability` *(String)*: `'available'` | `'unavailable'` *(Inicia en `'unavailable'`)*.
-* `createdAt` *(String ISO)*.
-* `updatedAt` *(String ISO)*.
-
-### 2. `vehicles`
-* `id` *(String)*: ID autogenerado del vehículo.
-* `driverId` *(String)*: Referencia al UID del conductor.
-* `category` *(String)*: `'economy'` | `'xl'` | `'premium'`.
-* `plate` *(String)*: Placa colombiana (ABC123).
-* `brand` *(String)*: Marca.
-* `model` *(String)*: Modelo.
-* `year` *(String)*: Año.
-* `color` *(String)*: Color.
-* `passengerCapacity` *(Number)*: Capacidad de pasajeros.
-* `vehiclePhoto` *(String)*: Foto del vehículo.
-* `createdAt`, `updatedAt` *(String ISO)*.
-
-### 3. `documents`
-* `id` *(String)*: ID autogenerado del registro de documentos.
-* `driverId` *(String)*: Referencia al UID del conductor.
-* `licenseNumber` *(String)*: Número de licencia.
-* `licensePhoto` *(String)*: Foto de licencia.
-* `licenseExpiration` *(String)*: Fecha de vencimiento de licencia.
-* `soatPhoto` *(String)*: Foto del SOAT.
-* `soatExpiration` *(String)*: Vencimiento del SOAT.
-* `technicalInspectionPhoto` *(String)*: Foto de tecnomecánica.
-* `technicalInspectionExpiration` *(String)*: Vencimiento de tecnomecánica.
-* `mercadopagoEmail` *(String)*: Correo de Mercado Pago.
-* `termsAccepted` *(Boolean)*: Aceptación de términos y condiciones.
-* `createdAt`, `updatedAt` *(String ISO)*.
-
-### 4. `trips`
-* `id` *(String)*: ID autogenerado del viaje.
-* `driverId` *(String | null)*: Conductor asignado.
-* `passengerId` *(String)*: Identificador del pasajero.
-* `origin` *(Object)*: `{ address, latitude, longitude }`.
-* `destination` *(Object)*: `{ address, latitude, longitude }`.
-* `distanceKm` *(Number)*: Distancia en km.
-* `durationMin` *(Number)*: Duración estimada en minutos.
-* `category` *(String)*: Categoría del viaje.
-* `fare` *(Number)*: Tarifa total cobrada en COP (entero).
-* `commission` *(Number)*: Comisión de la plataforma del 20% en COP (entero).
-* `tip` *(Number)*: Propina 100% para el conductor en COP (entero).
-* `driverEarnings` *(Number)*: Ganancia neta `(fare - commission) + tip` en COP (entero).
-* `commissionRate` *(Number)*: 0.20 fijo.
-* `paymentMethod` *(String)*: `'cash'` | `'mercadopago'`.
-* `paymentStatus` *(String)*: `'pending'` | `'paid'`.
-* `paymentId` *(String)*: ID de transacción de pago.
-* `status` *(String)*: `'requested'` | `'accepted'` | `'driver_arriving'` | `'in_progress'` | `'completed'` | `'paid'` | `'cancelled'`.
-* `rating` *(Number)*: Calificación (1 - 5).
-* `createdAt` *(String ISO)*.
-* `expiresAt` *(Number ms)*: Timestamp de expiración (15 segundos para atender solicitud).
-* `completedAt` *(String ISO | null)*.
-
-### 5. `driverLocations`
-* `driverId` *(String, ID del documento)*: UID del conductor.
-* `latitude` *(Number)*: Latitud actual.
-* `longitude` *(Number)*: Longitud actual.
-* `updatedAt` *(String ISO)*: Timestamp de sincronización.
-
-### 6. `driverEarnings`
-* `id` *(String)*: ID de la liquidación.
-* `driverId` *(String)*: Conductor.
-* `tripId` *(String)*: Viaje liquidado.
-* `fare` *(Number)*: Tarifa (COP entero).
-* `commission` *(Number)*: Comisión retenida 20% (COP entero).
-* `tip` *(Number)*: Propina recibida (COP entero).
-* `netEarnings` *(Number)*: Ganancia neta depositada (COP entero).
-* `paymentMethod` *(String)*: Método de pago.
-* `createdAt` *(String ISO)*.
-
----
-
-## 3. Despliegue de Reglas de Seguridad
-
-El archivo [firestore.rules](file:///c:/Users/luisb/OneDrive/Escritorio/final%20movil/UberClone/firestore.rules) implementa las políticas de acceso:
-1. **Acceso al perfil:** Cada conductor solo consulta y modifica sus propios datos.
-2. **Protección de aprobación:** Un conductor no puede modificar su propio campo `status` de aprobación.
-3. **Control de disponibilidad:** Solamente cuando `status == 'approved'`, Firestore permite actualizar `availability` a `'available'`.
-4. **Viajes y solicitudes:** Solo los conductores autenticados pueden ver viajes abiertos (`'requested'`) o asignados a su UID.
-5. **Ganancias inmutables:** Los registros en `driverEarnings` solo se pueden crear, no editar ni borrar.
-
-Para desplegar las reglas a Firebase:
-```bash
-npm install -g firebase-tools
-firebase login
-firebase use tu-proyecto-id
-firebase deploy --only firestore:rules
-```
-
----
-
-## 4. Ejecución de Pruebas Automatizadas
-
-Se incluyó una suite de validación en [tests/verify_business_rules.js](file:///c:/Users/luisb/OneDrive/Escritorio/final%20movil/UberClone/tests/verify_business_rules.js). Para ejecutarla:
+`.env` está excluido de Git. Reinicia Expo después de guardarlo:
 
 ```bash
-node tests/verify_business_rules.js
+npx expo start --clear
 ```
 
-Esta suite valida:
-* Cálculo exacto de la comisión del 20% en COP entero.
-* Asignación del 100% de propinas al conductor.
-* Restricción estricta de disponibilidad solo para conductores aprobados.
-* Temporizador de expiración de 15 segundos para solicitudes.
-* Presencia de todos los campos y colecciones requeridas.
+La app muestra una pantalla de configuración si faltan variables o siguen teniendo los valores de ejemplo. Estos valores identifican el proyecto; la seguridad depende de Authentication y las reglas de Firestore. No pongas claves de cuenta de servicio ni claves privadas en la app.
 
----
+## 3. Desplegar reglas e índices
 
-## 5. Ejecución del Proyecto
-
-Para iniciar la aplicación en Expo:
+El `.firebaserc` asocia este directorio al mismo `projectId` de `.env`. Inicia sesión con una cuenta que tenga permisos de edición sobre ese proyecto y despliega Authentication, las reglas y los índices:
 
 ```bash
-# Iniciar el servidor de desarrollo Expo
-npx expo start
+npx firebase-tools login
+npx firebase-tools deploy --only auth,firestore
 ```
 
-Presiona `w` para abrir en la web, `a` para emulador Android, o escanea el código QR con Expo Go en tu dispositivo móvil.
+`firebase.json` activa Email/Password y enlaza `firestore.rules` y `firestore.indexes.json`. La base debe existir en Firebase Console antes del despliegue.
 
+## 4. Colecciones usadas
+
+| Colección | ID del documento | Uso |
+|---|---|---|
+| `drivers` | UID de Firebase Auth | Perfil, aprobación y disponibilidad del conductor |
+| `vehicles` | Autogenerado | Vehículos asociados a `driverId` |
+| `documents` | Autogenerado | Documentos asociados a `driverId` |
+| `trips` | Autogenerado | Solicitudes, asignación y estado del viaje |
+| `driverLocations` | UID del conductor | Última ubicación del conductor |
+| `driverEarnings` | ID del viaje | Una liquidación inmutable por viaje completado |
+
+Los documentos del conductor, vehículo y documentos se crean al terminar el registro. Las solicitudes de demostración guardan el UID autenticado en `passengerId` y el nombre mostrado en `passengerName`.
+
+## 5. Acceso y límites actuales
+
+- Cada conductor solo lee sus propios vehículos, documentos, perfil y ubicación.
+- Solo un conductor aprobado y disponible puede leer/aceptar solicitudes abiertas.
+- Los conductores no pueden cambiar su propio estado de aprobación. Un administrador debe aprobarlos desde Firebase Console o un backend confiable.
+- Las ganancias solo pueden guardarse para un viaje completado, con importes iguales al viaje, y el ID del documento evita liquidaciones duplicadas.
+- La app todavía crea solicitudes de demostración y calcula tarifas en el cliente. Antes de usar pasajeros o pagos reales, esa creación y el cálculo de tarifas deben pasar a un backend confiable; las reglas no pueden verificar que una tarifa calculada en el dispositivo sea legítima.
+
+Para comprobar la conexión, registra una cuenta de prueba y confirma en Firebase Console que aparezcan sus documentos en `drivers`, `vehicles` y `documents`. Las colecciones restantes se crean al usar sus funciones por primera vez.

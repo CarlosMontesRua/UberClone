@@ -195,7 +195,7 @@ export const DocumentsScreen = ({ navigation }) => {
             <View style={[commonStyles.progressFill, commonStyles.progressFull]} />
           </View>
 
-          <Text style={commonStyles.step}>Paso 3 de 3</Text>
+          <Text style={commonStyles.step}>Paso 4 de 4</Text>
           <Text style={commonStyles.title}>Documentos y pagos</Text>
           <Text style={commonStyles.subtitle}>
             Completa tus documentos y datos de pago para continuar con el proceso de verificación.

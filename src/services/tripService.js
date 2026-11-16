@@ -5,17 +5,18 @@ import {
   getDoc,
   getDocs,
   updateDoc,
-  arrayUnion,
+  deleteDoc,
   query,
   where,
   orderBy,
   onSnapshot,
 } from 'firebase/firestore';
-import { getDb, getFirebaseAuth } from '../config/firebase';
+import { getDb } from '../config/firebase';
+import { calculateFare, PRICING } from '../config/pricing';
 
 const TRIPS = 'trips';
-export const COMMISSION_RATE = 0.20; // 20% de comisión de la plataforma
-export const REQUEST_EXPIRATION_SECONDS = 15; // 15 segundos para atender solicitud
+export const COMMISSION_RATE = PRICING.commissionRate;
+export const REQUEST_EXPIRATION_SECONDS = 15;
 
 export const tripService = {
   /**
@@ -30,39 +31,36 @@ export const tripService = {
    */
   async createTrip(tripData) {
     const db = getDb();
-    const passengerId = getFirebaseAuth().currentUser?.uid;
-    if (!passengerId) throw new Error('Debes iniciar sesión para crear una solicitud de viaje.');
-
     const tripRef = doc(collection(db, TRIPS));
     const now = new Date();
     const nowIso = now.toISOString();
 
-    const fare = Math.round(Number(tripData.fare) || 0);
     const tip = Math.round(Number(tripData.tip) || 0);
-    const commission = Math.round(fare * COMMISSION_RATE);
-    const driverEarnings = Math.round(fare - commission + tip);
+    const distanceKm = Number(tripData.distanceKm) || 3.5;
+    const durationMin = Number(tripData.durationMin) || 12;
+    const category = tripData.category || 'economy';
+    const priced = calculateFare({ distanceKm, durationMin, category, tip });
 
     const payload = {
       id: tripRef.id,
-      driverId: null,
-      passengerId,
-      passengerName: tripData.passengerName || 'Pasajero',
+      driverId: tripData.driverId || null,
+      passengerId: tripData.passengerId || 'pasajero_demo',
       origin: tripData.origin || { address: 'Origen no especificado', latitude: 4.6097, longitude: -74.0817 },
       destination: tripData.destination || { address: 'Destino no especificado', latitude: 4.6533, longitude: -74.0836 },
-      distanceKm: Number(tripData.distanceKm) || 3.5,
-      durationMin: Number(tripData.durationMin) || 12,
-      category: tripData.category || 'economy',
-      fare,
-      commission,
+      distanceKm,
+      durationMin,
+      category,
+      fare: priced.fare,
+      commission: priced.commission,
       tip,
-      driverEarnings,
-      commissionRate: COMMISSION_RATE,
+      driverEarnings: priced.driverEarnings,
+      commissionRate: priced.commissionRate,
       paymentMethod: tripData.paymentMethod || 'cash',
       paymentStatus: tripData.paymentStatus || 'pending',
       paymentId: tripData.paymentId || `PAY-${Date.now()}`,
       status: 'requested',
-      declinedBy: [],
       rating: Number(tripData.rating) || 0,
+      routePolyline: tripData.routePolyline || [],
       createdAt: nowIso,
       expiresAt: now.getTime() + REQUEST_EXPIRATION_SECONDS * 1000,
       completedAt: null,
@@ -131,26 +129,10 @@ export const tripService = {
    */
   async rejectTrip(tripId, driverId) {
     const db = getDb();
-    const tripRef = doc(db, TRIPS, tripId);
-    const now = new Date().toISOString();
-
-    if (driverId === 'expired') {
-      await updateDoc(tripRef, {
-        status: 'cancelled',
-        updatedAt: now,
-      });
-      return;
-    }
-
-    const currentUid = getFirebaseAuth().currentUser?.uid;
-    if (!driverId || driverId !== currentUid) {
-      throw new Error('Solo puedes rechazar solicitudes con tu propia sesión.');
-    }
-
-    // A driver's rejection must not cancel the request for every other driver.
-    await updateDoc(tripRef, {
-      declinedBy: arrayUnion(driverId),
-      updatedAt: now,
+    await updateDoc(doc(db, TRIPS, tripId), {
+      status: 'cancelled',
+      cancelledBy: driverId,
+      updatedAt: new Date().toISOString(),
     });
   },
 
@@ -166,7 +148,7 @@ export const tripService = {
       ...additionalData,
     };
 
-    if (newStatus === 'completed') {
+    if (newStatus === 'completed' || newStatus === 'paid') {
       if (!updates.completedAt) {
         updates.completedAt = new Date().toISOString();
       }
@@ -199,7 +181,7 @@ export const tripService = {
    * Escucha solicitudes de viajes pendientes en tiempo real ('requested')
    * que no hayan expirado (> Date.now()).
    */
-  subscribeToAvailableRequests(category, callback, driverId) {
+  subscribeToAvailableRequests(category, callback) {
     const db = getDb();
     const q = query(
       collection(db, TRIPS),
@@ -217,8 +199,7 @@ export const tripService = {
             // Filtrar solicitudes con menos de 15 segundos
             const notExpired = !t.expiresAt || t.expiresAt > now;
             const matchesCategory = !category || t.category === category;
-            const notDeclined = !driverId || !t.declinedBy?.includes(driverId);
-            return notExpired && matchesCategory && notDeclined;
+            return notExpired && matchesCategory;
           });
         callback(available);
       },
@@ -235,7 +216,7 @@ export const tripService = {
   subscribeToActiveTripForDriver(driverId, callback) {
     if (!driverId) return () => {};
     const db = getDb();
-    const activeStatuses = ['accepted', 'driver_arriving', 'in_progress', 'completed'];
+    const activeStatuses = ['accepted', 'driver_arriving', 'in_progress'];
     const q = query(
       collection(db, TRIPS),
       where('driverId', '==', driverId),
@@ -264,8 +245,9 @@ export const tripService = {
   async getTripHistory(driverId, filters = {}) {
     if (!driverId) return [];
     const db = getDb();
+    const limitCount = Number(filters.limit) || 20;
 
-    let q = query(
+    const q = query(
       collection(db, TRIPS),
       where('driverId', '==', driverId),
       orderBy('createdAt', 'desc'),
@@ -278,6 +260,10 @@ export const tripService = {
       trips = trips.filter((t) => t.status === filters.status);
     }
 
+    if (filters.paymentMethod && filters.paymentMethod !== 'all') {
+      trips = trips.filter((t) => t.paymentMethod === filters.paymentMethod);
+    }
+
     if (filters.startDate) {
       trips = trips.filter((t) => new Date(t.createdAt) >= new Date(filters.startDate));
     }
@@ -286,9 +272,42 @@ export const tripService = {
       trips = trips.filter((t) => new Date(t.createdAt) <= new Date(filters.endDate));
     }
 
-    return trips;
+    return trips.slice(0, limitCount);
   },
 
+  async markCashPaymentReceived(tripId) {
+    await this.changeTripStatus(tripId, 'paid', {
+      paymentMethod: 'cash',
+      paymentStatus: 'paid',
+      paymentId: `CASH-${Date.now()}`,
+    });
+  },
+
+  async completeTripWithFare(tripId, { distanceKm, durationMin, category, tip, routePolyline }) {
+    const trip = await this.getTrip(tripId);
+    if (!trip) throw new Error('Viaje no encontrado');
+
+    const priced = calculateFare({
+      distanceKm: distanceKm ?? trip.distanceKm,
+      durationMin: durationMin ?? trip.durationMin,
+      category: category || trip.category,
+      tip: tip ?? trip.tip ?? 0,
+    });
+
+    await this.changeTripStatus(tripId, 'completed', {
+      ...priced,
+      tip: Math.round(Number(tip ?? trip.tip) || 0),
+      routePolyline: routePolyline || trip.routePolyline || [],
+      completedAt: new Date().toISOString(),
+    });
+
+    return this.getTrip(tripId);
+  },
+
+  async deleteTrip(tripId) {
+    const db = getDb();
+    await deleteDoc(doc(db, TRIPS, tripId));
+  },
 };
 
 export default tripService;

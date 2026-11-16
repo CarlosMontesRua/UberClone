@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,17 +8,27 @@ import {
   Alert,
   ActivityIndicator,
   Pressable,
+  Platform,
+  Image,
 } from 'react-native';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppButton } from '../components/AppButton';
 import { colors, commonStyles, radii, spacing, typography } from '../theme/theme';
 import { useRegistration } from '../hooks/useRegistration';
+import { useDriverLocation } from '../hooks/useDriverLocation';
+import { useTripRoute } from '../hooks/useTripRoute';
+import { useTripRequests } from '../hooks/useTripRequests';
+import { useTrip } from '../context/TripContext';
 import { driverService } from '../services/driverService';
 import { tripService } from '../services/tripService';
-import { locationService } from '../services/locationService';
-import { earningsService } from '../services/earningsService';
+import { notificationService } from '../services/notificationService';
+import { calculateFare } from '../config/pricing';
+import { MEDELLIN_CENTER, pickRandomMedellinRoute } from '../data/medellinRoutes';
 import { doc, updateDoc } from 'firebase/firestore';
 import { getDb } from '../config/firebase';
+
+// AI-assisted: see docs/AI_LOG.md #1
 
 const STATUS_LABELS = {
   pending: { label: 'En revisión (Pendiente)', color: colors.warning || '#D97706', bg: '#FEF3C7' },
@@ -28,7 +38,7 @@ const STATUS_LABELS = {
 
 const TRIP_STATUS_LABELS = {
   requested: 'Solicitado',
-  accepted: 'Aceptado (Dirígete al origen)',
+  accepted: 'Aceptado (dirígete al origen)',
   driver_arriving: 'Llegando al punto de recogida',
   in_progress: 'Viaje en curso',
   completed: 'Viaje completado',
@@ -36,20 +46,57 @@ const TRIP_STATUS_LABELS = {
   cancelled: 'Cancelado',
 };
 
+const PAYMENT_STATUS_LABELS = {
+  pending: 'Pendiente',
+  paid: 'Pagado',
+  approved: 'Aprobado',
+  rejected: 'Rechazado',
+  cash: 'Efectivo',
+};
+
 export const DriverDashboardScreen = ({ navigation }) => {
   const { activeDriverId, resetRegistration } = useRegistration();
+  const { activeTrip, setCompletedForPayment } = useTrip();
   const [driver, setDriver] = useState(null);
   const [loading, setLoading] = useState(true);
   const [updatingAvailability, setUpdatingAvailability] = useState(false);
-  const [activeTrip, setActiveTrip] = useState(null);
-  const [availableRequests, setAvailableRequests] = useState([]);
-  const [driverLocation, setDriverLocation] = useState(null);
-  const [timeLeft, setTimeLeft] = useState(15);
-  const timerRef = useRef(null);
+  const [carCoord, setCarCoord] = useState(null);
+  const [tracksCar, setTracksCar] = useState(true);
+  const [routeArrived, setRouteArrived] = useState(false);
+  const mapRef = useRef(null);
+  const notifiedRequestId = useRef(null);
+  const routeAnimRef = useRef(null);
+  const fittedRouteKey = useRef(null);
+
+  const isAvailable = driver?.availability === 'available';
+  const {
+    location: driverLocation,
+    error: locationError,
+    loading: locationLoading,
+    permissionStatus,
+    requestPermission,
+  } = useDriverLocation({
+    driverId: activeDriverId,
+    tracking: Boolean(activeDriverId && isAvailable),
+  });
+
+  const {
+    coordinates: routeCoordinates,
+    meta: routeMeta,
+    error: routeError,
+    loading: routeLoading,
+  } = useTripRoute({ trip: activeTrip, driverLocation });
+
+  const { currentRequest, timeLeft, acceptRequest, rejectRequest } = useTripRequests({
+    enabled: Boolean(isAvailable && !activeTrip),
+  });
 
   // 1. Suscripción en tiempo real al perfil del conductor
   useEffect(() => {
-    if (!activeDriverId) return;
+    if (!activeDriverId) {
+      setLoading(false);
+      return;
+    }
 
     const unsubscribe = driverService.subscribeToDriver(activeDriverId, (data) => {
       setDriver(data);
@@ -59,74 +106,104 @@ export const DriverDashboardScreen = ({ navigation }) => {
     return () => unsubscribe();
   }, [activeDriverId]);
 
-  // 2. Suscripción en tiempo real a la ubicación del conductor
+  // Notificación local: una sola vez por solicitud
   useEffect(() => {
-    if (!activeDriverId) return;
+    const id = currentRequest?.id;
+    if (!id || notifiedRequestId.current === id) return;
+    notifiedRequestId.current = id;
+    notificationService.notifyNewTripRequest(currentRequest).catch(() => {});
+  }, [currentRequest?.id]);
 
-    const unsubscribe = locationService.subscribeToDriverLocation(activeDriverId, (loc) => {
-      setDriverLocation(loc);
-    });
-
-    return () => unsubscribe();
-  }, [activeDriverId]);
-
-  // 3. Suscripción en tiempo real al viaje activo
+  // GPS solo sin viaje activo (con viaje, el carro sigue la animación de ruta)
   useEffect(() => {
-    if (!activeDriverId) return;
-
-    const unsubscribe = tripService.subscribeToActiveTripForDriver(activeDriverId, (trip) => {
-      setActiveTrip(trip);
-    });
-
-    return () => unsubscribe();
-  }, [activeDriverId]);
-
-  // 4. Suscripción a solicitudes entrantes en tiempo real ('requested')
-  useEffect(() => {
-    if (driver?.availability !== 'available' || activeTrip || !activeDriverId) return;
-
-    const unsubscribe = tripService.subscribeToAvailableRequests(
-      null,
-      (requests) => setAvailableRequests(requests),
-      activeDriverId,
+    if (activeTrip) return;
+    if (driverLocation) {
+      setCarCoord(driverLocation);
+      return;
+    }
+    setCarCoord((prev) =>
+      prev || {
+        latitude: MEDELLIN_CENTER.latitude,
+        longitude: MEDELLIN_CENTER.longitude,
+      },
     );
+  }, [driverLocation?.latitude, driverLocation?.longitude, activeTrip]);
 
-    return () => unsubscribe();
-  }, [driver?.availability, activeTrip, activeDriverId]);
-
-  // 5. Temporizador regresivo de 15 segundos para la solicitud activa
-  const currentRequest =
-    driver?.availability === 'available' && !activeTrip && availableRequests.length > 0
-      ? availableRequests[0]
-      : null;
-
+  // Animar el carro; al llegar habilita el botón de la siguiente acción
   useEffect(() => {
-    if (!currentRequest) {
-      if (timerRef.current) clearInterval(timerRef.current);
+    if (routeAnimRef.current) {
+      clearInterval(routeAnimRef.current);
+      routeAnimRef.current = null;
+    }
+
+    if (!activeTrip || routeCoordinates.length < 2) {
+      setRouteArrived(false);
+      return undefined;
+    }
+
+    // En "accepted" el botón de salir no depende de llegar
+    if (activeTrip.status === 'accepted') {
+      setRouteArrived(true);
+      return undefined;
+    }
+
+    // Si acabamos de llegar a recogida, el carro ya está en el origen de la nueva ruta
+    const startAt =
+      activeTrip.status === 'in_progress' && carCoord
+        ? carCoord
+        : routeCoordinates[0];
+
+    let index = 0;
+    setRouteArrived(false);
+    setCarCoord(startAt);
+    setTracksCar(true);
+
+    routeAnimRef.current = setInterval(() => {
+      index += Math.max(1, Math.floor(routeCoordinates.length / 40));
+      if (index >= routeCoordinates.length - 1) {
+        index = routeCoordinates.length - 1;
+        setCarCoord(routeCoordinates[index]);
+        clearInterval(routeAnimRef.current);
+        routeAnimRef.current = null;
+        setTracksCar(false);
+        setRouteArrived(true);
+        return;
+      }
+      setCarCoord(routeCoordinates[index]);
+    }, 600);
+
+    return () => {
+      if (routeAnimRef.current) clearInterval(routeAnimRef.current);
+    };
+  }, [activeTrip?.id, activeTrip?.status, routeCoordinates]);
+
+  // Ajustar mapa UNA vez por ruta (permite zoom manual después)
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    if (routeCoordinates.length > 1) {
+      const key = `${activeTrip?.id || 'x'}-${activeTrip?.status || 's'}-${routeCoordinates.length}`;
+      if (fittedRouteKey.current === key) return;
+      fittedRouteKey.current = key;
+      mapRef.current.fitToCoordinates(routeCoordinates, {
+        edgePadding: { top: 48, right: 48, bottom: 48, left: 48 },
+        animated: true,
+      });
       return;
     }
 
-    const updateTimer = () => {
-      if (!currentRequest.expiresAt) {
-        setTimeLeft(15);
-        return;
-      }
-      const remainingSecs = Math.max(0, Math.ceil((currentRequest.expiresAt - Date.now()) / 1000));
-      setTimeLeft(remainingSecs);
-
-      if (remainingSecs <= 0) {
-        // Expiró
-        tripService.rejectTrip(currentRequest.id, 'expired').catch(() => {});
-      }
-    };
-
-    updateTimer();
-    timerRef.current = setInterval(updateTimer, 1000);
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [currentRequest]);
+    if (activeTrip) return;
+    const focus = carCoord || driverLocation || MEDELLIN_CENTER;
+    mapRef.current.animateToRegion(
+      {
+        latitude: focus.latitude,
+        longitude: focus.longitude,
+        latitudeDelta: 0.02,
+        longitudeDelta: 0.02,
+      },
+      500,
+    );
+  }, [routeCoordinates, activeTrip?.id, activeTrip?.status]);
 
   // Cambiar disponibilidad (Regla de negocio: Solo approved puede ser available)
   const handleToggleAvailability = async (newVal) => {
@@ -140,6 +217,11 @@ export const DriverDashboardScreen = ({ navigation }) => {
           '.',
       );
       return;
+    }
+
+    if (newVal) {
+      const granted = await requestPermission();
+      if (!granted) return;
     }
 
     setUpdatingAvailability(true);
@@ -169,81 +251,39 @@ export const DriverDashboardScreen = ({ navigation }) => {
     }
   };
 
-  // Actualizar ubicación del conductor
-  const handleUpdateLocation = async () => {
-    if (!activeDriverId) return;
-    // Generar coordenadas ligeramente desplazadas alrededor de Bogotá para simular GPS real
-    const baseLat = 4.6097;
-    const baseLng = -74.0817;
-    const randomOffset = (Math.random() - 0.5) * 0.02;
-
-    try {
-      await locationService.updateDriverLocation(activeDriverId, {
-        latitude: parseFloat((baseLat + randomOffset).toFixed(6)),
-        longitude: parseFloat((baseLng + randomOffset).toFixed(6)),
-      });
-      Alert.alert('Ubicación actualizada', 'Se guardaron las nuevas coordenadas en driverLocations.');
-    } catch (err) {
-      Alert.alert('Error actualizando ubicación', err.message);
-    }
-  };
-
-  // Simular creación de una nueva solicitud de viaje en tiempo real
+  // Simular solicitud con rutas populares de Medellín
   const handleSimulateNewRequest = async () => {
     try {
-      const demoTrips = [
-        {
-          passengerName: 'María Gómez',
-          origin: { address: 'Calle 72 # 11-86, Zona Rosa', latitude: 4.657, longitude: -74.058 },
-          destination: { address: 'Aeropuerto El Dorado, T1', latitude: 4.701, longitude: -74.146 },
-          fare: 35000,
-          tip: 5000,
-          distanceKm: 14.2,
-          durationMin: 32,
-          category: 'economy',
-          paymentMethod: 'mercadopago',
-        },
-        {
-          passengerName: 'Andrés Castro',
-          origin: { address: 'Parque de la 93, Cra 13', latitude: 4.676, longitude: -74.048 },
-          destination: { address: 'Centro Comercial Unicentro', latitude: 4.702, longitude: -74.041 },
-          fare: 18000,
-          tip: 2000,
-          distanceKm: 5.8,
-          durationMin: 18,
-          category: 'xl',
-          paymentMethod: 'cash',
-        },
-      ];
-
-      const chosen = demoTrips[Math.floor(Math.random() * demoTrips.length)];
-      await tripService.createTrip(chosen);
-      Alert.alert('Solicitud enviada', 'Se creó una nueva solicitud de viaje en Firestore con temporizador de 15s.');
+      const chosen = pickRandomMedellinRoute();
+      const priced = calculateFare(chosen);
+      await tripService.createTrip({ ...chosen, ...priced });
+      Alert.alert(
+        'Solicitud Medellín',
+        `${chosen.origin.address} → ${chosen.destination.address}`,
+      );
     } catch (err) {
       Alert.alert('Error', err.message);
     }
   };
 
-  // Aceptar viaje
-  const handleAcceptTrip = async (tripId) => {
+  const handleAcceptTrip = useCallback(async () => {
     try {
-      await tripService.acceptTrip(tripId, activeDriverId);
-      Alert.alert('¡Viaje aceptado!', 'Iniciando el seguimiento del viaje.');
+      await acceptRequest(activeDriverId);
+      Alert.alert('¡Viaje aceptado!', 'Ruta a recogida activa.');
     } catch (err) {
       Alert.alert('No se pudo aceptar', err.message);
     }
-  };
+  }, [acceptRequest, activeDriverId]);
 
-  // Rechazar viaje
-  const handleRejectTrip = async (tripId) => {
+  const handleRejectTrip = useCallback(async () => {
     try {
-      await tripService.rejectTrip(tripId, activeDriverId);
+      await rejectRequest(activeDriverId);
     } catch (err) {
       Alert.alert('Error', err.message);
     }
-  };
+  }, [rejectRequest, activeDriverId]);
 
-  // Transición de estados del viaje en curso
+  // Transición de estados → al completar navega a cobro (efectivo; MP pendiente)
   const handleAdvanceTripStatus = async () => {
     if (!activeTrip) return;
 
@@ -252,21 +292,15 @@ export const DriverDashboardScreen = ({ navigation }) => {
     } else if (activeTrip.status === 'driver_arriving') {
       await tripService.changeTripStatus(activeTrip.id, 'in_progress');
     } else if (activeTrip.status === 'in_progress') {
-      // Al completar el viaje: pasar a 'completed' y registrar automáticamente ganancias
-      await tripService.changeTripStatus(activeTrip.id, 'completed');
-      await earningsService.recordEarnings({
-        driverId: activeDriverId,
-        tripId: activeTrip.id,
-        fare: activeTrip.fare,
-        commission: activeTrip.commission,
+      const completed = await tripService.completeTripWithFare(activeTrip.id, {
+        distanceKm: activeTrip.distanceKm,
+        durationMin: activeTrip.durationMin,
+        category: activeTrip.category,
         tip: activeTrip.tip || 0,
-        paymentMethod: activeTrip.paymentMethod || 'cash',
+        routePolyline: routeCoordinates,
       });
-      Alert.alert('Viaje completado', 'Las ganancias del viaje fueron registradas exitosamente en driverEarnings.');
-    } else if (activeTrip.status === 'completed') {
-      // Registrar pago
-      await tripService.changeTripStatus(activeTrip.id, 'paid');
-      Alert.alert('Pago confirmado', 'El viaje ha quedado marcado como pagado.');
+      setCompletedForPayment(completed);
+      navigation.navigate('TripPayment', { trip: completed });
     }
   };
 
@@ -284,11 +318,13 @@ export const DriverDashboardScreen = ({ navigation }) => {
     ]);
   };
 
-  if (loading && activeDriverId) {
+  if (loading) {
     return (
       <View style={commonStyles.center}>
         <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={{ marginTop: spacing.md, color: colors.textMuted }}>Cargando datos de Firestore...</Text>
+        <Text style={{ marginTop: spacing.md, color: colors.textMuted }}>
+          Cargando datos del conductor...
+        </Text>
       </View>
     );
   }
@@ -304,6 +340,15 @@ export const DriverDashboardScreen = ({ navigation }) => {
       >
         {/* Cabecera del Conductor */}
         <View style={styles.headerCard}>
+          {driver?.profilePhoto ? (
+            <Image source={{ uri: driver.profilePhoto }} style={styles.driverAvatar} />
+          ) : (
+            <View style={[styles.driverAvatar, styles.driverAvatarEmpty]}>
+              <Text style={styles.driverAvatarInitial}>
+                {(driver?.fullName || 'C').trim().charAt(0).toUpperCase()}
+              </Text>
+            </View>
+          )}
           <View style={styles.driverInfo}>
             <Text style={styles.driverName}>{driver?.fullName || 'Conductor UberClone'}</Text>
             <Text style={styles.driverDoc}>C.C. {driver?.documentNumber || 'Sin documento'}</Text>
@@ -352,19 +397,123 @@ export const DriverDashboardScreen = ({ navigation }) => {
           </Pressable>
         </View>
 
-        {/* Ubicación en tiempo real */}
-        <View style={styles.card}>
+        {/* Mapa: carro + ruta real (recogida / destino) */}
+        <View style={styles.mapCard}>
           <View style={styles.rowBetween}>
-            <Text style={styles.cardTitle}>Ubicación en tiempo real</Text>
-            <Pressable onPress={handleUpdateLocation} style={styles.linkButton}>
-              <Text style={styles.linkButtonText}>Actualizar GPS</Text>
-            </Pressable>
+            <Text style={styles.cardTitle}>Mapa</Text>
+            <Text style={styles.locationSub}>
+              {routeLoading
+                ? 'Calculando ruta...'
+                : routeMeta?.label
+                  ? routeMeta.label
+                  : isAvailable
+                    ? locationLoading
+                      ? 'Activando GPS...'
+                      : 'GPS activo'
+                    : 'Activa Disponible para enviar GPS'}
+            </Text>
           </View>
+
+          {routeMeta?.durationMin != null ? (
+            <Text style={styles.routeMetaText}>
+              {routeMeta.distanceKm?.toFixed(1)} km · {routeMeta.durationMin} min ·{' '}
+              {routeMeta.mode === 'pickup'
+                ? 'En camino al pasajero'
+                : 'En camino al destino'}
+            </Text>
+          ) : null}
+
+          {isAvailable && permissionStatus === 'denied' ? (
+            <View style={styles.permissionBox}>
+              <Text style={styles.warningText}>
+                Para estar Disponible hace falta permiso de ubicación.
+              </Text>
+              <AppButton title="Permitir ubicación" onPress={requestPermission} style={{ marginTop: spacing.sm }} />
+            </View>
+          ) : null}
+
+          {isAvailable && locationError ? (
+            <Text style={[styles.warningText, { marginBottom: spacing.sm }]}>{locationError}</Text>
+          ) : null}
+
+          {routeError ? (
+            <Text style={[styles.warningText, { marginBottom: spacing.sm }]}>
+              Ruta: {routeError}
+            </Text>
+          ) : null}
+
+          <View style={styles.mapContainer}>
+            <MapView
+              ref={mapRef}
+              style={styles.map}
+              provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
+              mapType="standard"
+              showsUserLocation={false}
+              showsMyLocationButton={false}
+              zoomEnabled
+              scrollEnabled
+              pitchEnabled
+              rotateEnabled
+              initialRegion={MEDELLIN_CENTER}
+            >
+              {carCoord ? (
+                <Marker
+                  coordinate={{
+                    latitude: carCoord.latitude,
+                    longitude: carCoord.longitude,
+                  }}
+                  title="Conductor"
+                  description="Tu vehículo"
+                  anchor={{ x: 0.5, y: 0.5 }}
+                  flat
+                  tracksViewChanges={tracksCar}
+                >
+                  <View style={styles.carMarker}>
+                    <Text style={styles.carEmoji}>🚗</Text>
+                  </View>
+                </Marker>
+              ) : null}
+
+              {activeTrip?.origin?.latitude ? (
+                <Marker
+                  coordinate={{
+                    latitude: Number(activeTrip.origin.latitude),
+                    longitude: Number(activeTrip.origin.longitude),
+                  }}
+                  title="Recogida"
+                  description={activeTrip.origin.address}
+                  pinColor="#16A34A"
+                />
+              ) : null}
+
+              {activeTrip?.destination?.latitude &&
+              (activeTrip.status === 'in_progress' ||
+                activeTrip.status === 'accepted' ||
+                activeTrip.status === 'driver_arriving') ? (
+                <Marker
+                  coordinate={{
+                    latitude: Number(activeTrip.destination.latitude),
+                    longitude: Number(activeTrip.destination.longitude),
+                  }}
+                  title="Destino"
+                  description={activeTrip.destination.address}
+                  pinColor="#DC2626"
+                />
+              ) : null}
+
+              {routeCoordinates.length > 1 ? (
+                <Polyline
+                  coordinates={routeCoordinates}
+                  strokeColor={routeMeta?.mode === 'dropoff' ? '#2563EB' : '#0E9F6E'}
+                  strokeWidth={5}
+                />
+              ) : null}
+            </MapView>
+          </View>
+
           <Text style={styles.locationText}>
-            Lat: {driverLocation?.latitude ?? 4.60971} | Lng: {driverLocation?.longitude ?? -74.08175}
-          </Text>
-          <Text style={styles.locationSub}>
-            Última sync: {driverLocation?.updatedAt ? new Date(driverLocation.updatedAt).toLocaleTimeString() : 'Automática'}
+            Lat: {driverLocation?.latitude?.toFixed(6) ?? '—'} | Lng:{' '}
+            {driverLocation?.longitude?.toFixed(6) ?? '—'}
           </Text>
         </View>
 
@@ -379,7 +528,7 @@ export const DriverDashboardScreen = ({ navigation }) => {
             </View>
 
             <View style={styles.tripDetails}>
-              <Text style={styles.tripPassenger}>👤 Pasajero: {currentRequest.passengerName || currentRequest.passengerId}</Text>
+              <Text style={styles.tripPassenger}>👤 Pasajero: {currentRequest.passengerId}</Text>
               <Text style={styles.tripRoute}>🟢 Origen: {currentRequest.origin?.address || 'Ubicación origen'}</Text>
               <Text style={styles.tripRoute}>🔴 Destino: {currentRequest.destination?.address || 'Ubicación destino'}</Text>
 
@@ -405,12 +554,12 @@ export const DriverDashboardScreen = ({ navigation }) => {
               <AppButton
                 title="Rechazar"
                 variant="outline"
-                onPress={() => handleRejectTrip(currentRequest.id)}
+                onPress={handleRejectTrip}
                 style={styles.halfBtn}
               />
               <AppButton
                 title={`Aceptar (${timeLeft}s)`}
-                onPress={() => handleAcceptTrip(currentRequest.id)}
+                onPress={handleAcceptTrip}
                 style={styles.halfBtn}
               />
             </View>
@@ -428,7 +577,7 @@ export const DriverDashboardScreen = ({ navigation }) => {
             </View>
 
             <View style={styles.activeTripBody}>
-              <Text style={styles.tripPassenger}>👤 {activeTrip.passengerName || activeTrip.passengerId}</Text>
+              <Text style={styles.tripPassenger}>👤 {activeTrip.passengerId}</Text>
               <Text style={styles.tripRoute}>🟢 {activeTrip.origin?.address}</Text>
               <Text style={styles.tripRoute}>🔴 {activeTrip.destination?.address}</Text>
 
@@ -437,44 +586,71 @@ export const DriverDashboardScreen = ({ navigation }) => {
                   Ganancia estimada: <Text style={{ fontWeight: '700' }}>${activeTrip.driverEarnings?.toLocaleString('es-CO')} COP</Text>
                 </Text>
                 <Text style={styles.financialText}>
-                  Pago: {activeTrip.paymentMethod === 'cash' ? 'Efectivo' : 'Mercado Pago'} ({activeTrip.paymentStatus})
+                  Pago:{' '}
+                  {activeTrip.paymentMethod === 'cash'
+                    ? 'Efectivo'
+                    : activeTrip.paymentMethod === 'mercadopago'
+                      ? 'Mercado Pago'
+                      : activeTrip.paymentMethod}{' '}
+                  (
+                  {PAYMENT_STATUS_LABELS[activeTrip.paymentStatus] ||
+                    activeTrip.paymentStatus ||
+                    'Pendiente'}
+                  )
                 </Text>
               </View>
             </View>
 
             <View style={styles.activeTripActions}>
               {activeTrip.status === 'accepted' ? (
-                <AppButton title="Llegué al punto de encuentro" onPress={handleAdvanceTripStatus} />
-              ) : null}
-              {activeTrip.status === 'driver_arriving' ? (
-                <AppButton title="Iniciar viaje con pasajero" onPress={handleAdvanceTripStatus} />
-              ) : null}
-              {activeTrip.status === 'in_progress' ? (
-                <AppButton title="Finalizar viaje y liquidar" onPress={handleAdvanceTripStatus} />
-              ) : null}
-              {activeTrip.status === 'completed' ? (
-                <AppButton title="Confirmar pago recibido" onPress={handleAdvanceTripStatus} />
-              ) : null}
-              {activeTrip.status === 'paid' ? (
-                <Text style={{ textAlign: 'center', color: colors.accent, fontWeight: '700' }}>
-                  ✓ Viaje completado y pagado
-                </Text>
+                <AppButton
+                  title="Voy a recoger al pasajero"
+                  onPress={handleAdvanceTripStatus}
+                />
               ) : null}
 
-              {activeTrip.status !== 'completed' && activeTrip.status !== 'paid' ? (
-                <Pressable onPress={handleCancelActiveTrip} style={styles.cancelBtn}>
-                  <Text style={styles.cancelBtnText}>Cancelar viaje</Text>
-                </Pressable>
+              {activeTrip.status === 'driver_arriving' ? (
+                <>
+                  {!routeArrived ? (
+                    <Text style={styles.waitHint}>
+                      El botón se habilita cuando el carro llegue al punto de recogida…
+                    </Text>
+                  ) : null}
+                  <AppButton
+                    title="Pasajero a bordo"
+                    onPress={handleAdvanceTripStatus}
+                    disabled={!routeArrived}
+                  />
+                </>
               ) : null}
+
+              {activeTrip.status === 'in_progress' ? (
+                <>
+                  {!routeArrived ? (
+                    <Text style={styles.waitHint}>
+                      El botón se habilita cuando el carro llegue al destino…
+                    </Text>
+                  ) : null}
+                  <AppButton
+                    title="Finalizar viaje y cobrar"
+                    onPress={handleAdvanceTripStatus}
+                    disabled={!routeArrived}
+                  />
+                </>
+              ) : null}
+
+              <Pressable onPress={handleCancelActiveTrip} style={styles.cancelBtn}>
+                <Text style={styles.cancelBtnText}>Cancelar viaje</Text>
+              </Pressable>
             </View>
           </View>
         ) : null}
 
         {/* Botón para simular solicitud de viaje */}
         <View style={styles.simulationCard}>
-          <Text style={styles.simulationTitle}>Simulador de viajes en tiempo real</Text>
+          <Text style={styles.simulationTitle}>Simulador Medellín</Text>
           <Text style={styles.simulationSub}>
-            Envía una solicitud de viaje de prueba para ver la sincronización en Firestore.
+            Genera una solicitud con rutas populares de Medellín (Poblado, Laureles, Envigado, etc.).
           </Text>
           <AppButton
             title="+ Generar solicitud de viaje entrante"
@@ -508,6 +684,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  driverAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.surfaceStrong,
+  },
+  driverAvatarEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  driverAvatarInitial: {
+    ...typography.title,
+    fontSize: 22,
   },
   driverInfo: {
     flex: 1,
@@ -583,13 +774,37 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  linkButton: {
-    padding: spacing.xs,
+  mapCard: {
+    backgroundColor: colors.surface,
+    padding: spacing.lg,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.md,
   },
-  linkButtonText: {
-    ...typography.caption,
-    color: colors.accent,
-    fontWeight: '700',
+  mapContainer: {
+    height: 280,
+    borderRadius: radii.md,
+    overflow: 'hidden',
+    marginTop: spacing.sm,
+    backgroundColor: '#E5E7EB',
+  },
+  map: {
+    width: '100%',
+    height: '100%',
+  },
+  mapPlaceholder: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+  },
+  permissionBox: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+    padding: spacing.sm,
+    backgroundColor: '#FEF3C7',
+    borderRadius: radii.sm,
   },
   locationText: {
     ...typography.body,
@@ -600,6 +815,31 @@ const styles = StyleSheet.create({
   locationSub: {
     ...typography.caption,
     color: colors.textMuted,
+  },
+  routeMetaText: {
+    ...typography.caption,
+    color: colors.accent,
+    fontWeight: '700',
+    marginTop: spacing.xs,
+  },
+  carMarker: {
+    width: 48,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderRadius: 24,
+    borderWidth: 2,
+    borderColor: colors.primary,
+  },
+  carEmoji: {
+    fontSize: 28,
+  },
+  waitHint: {
+    ...typography.caption,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginBottom: spacing.xs,
   },
   requestCard: {
     backgroundColor: '#FFFBEB',

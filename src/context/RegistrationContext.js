@@ -133,6 +133,27 @@ export const RegistrationProvider = ({ children }) => {
   const submitRegistration = useCallback(async (allValues) => {
     const data = { ...registrationData, ...allValues };
 
+    // Asegura URLs persistentes (Storage/Cloudinary) antes de guardar en Firestore
+    const { uploadImageAsync } = await import('../services/cloudinaryService');
+    const ensureRemote = async (uri, folder) => {
+      if (!uri) return '';
+      if (/^https?:\/\//i.test(uri)) return uri;
+      try {
+        return (await uploadImageAsync(uri, folder)) || uri;
+      } catch {
+        return uri;
+      }
+    };
+
+    data.profilePhoto = await ensureRemote(data.profilePhoto, 'uberclone/drivers/profile');
+    data.vehiclePhoto = await ensureRemote(data.vehiclePhoto, 'uberclone/drivers/vehicle');
+    data.licensePhoto = await ensureRemote(data.licensePhoto, 'uberclone/drivers/license');
+    data.soatPhoto = await ensureRemote(data.soatPhoto, 'uberclone/drivers/soat');
+    data.techInspectionPhoto = await ensureRemote(
+      data.techInspectionPhoto,
+      'uberclone/drivers/tech',
+    );
+
     // 1. Obtener o crear ID de autenticación
     let driverId = authService.getCurrentUser()?.uid;
 
@@ -197,11 +218,9 @@ export const RegistrationProvider = ({ children }) => {
     // 5. Persistir localmente estado completado
     await AsyncStorage.setItem(CURRENT_DRIVER_KEY, driverId);
     await AsyncStorage.removeItem(DRAFT_KEY).catch(() => {});
-    await AsyncStorage.setItem(
-      REGISTRATION_KEY,
-      JSON.stringify({ ...data, password: '', confirmPassword: '' }),
-    );
-
+    const savedLocal = { ...data, password: '', confirmPassword: '' };
+    await AsyncStorage.setItem(REGISTRATION_KEY, JSON.stringify(savedLocal));
+    setRegistrationData(savedLocal);
     setActiveDriverId(driverId);
     setIsRegistered(true);
 

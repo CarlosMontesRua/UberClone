@@ -1,5 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 import {
   initializeAuth,
   getReactNativePersistence,
@@ -64,6 +65,7 @@ export const isFirebaseConfigured = () => getMissingFirebaseConfig().length === 
 let app;
 let db;
 let auth;
+let storage;
 
 export const initFirebase = () => {
   const missing = getMissingFirebaseConfig();
@@ -81,6 +83,10 @@ export const initFirebase = () => {
     db = getFirestore(app);
   }
 
+  if (!storage) {
+    storage = getStorage(app);
+  }
+
   if (!auth) {
     try {
       if (Platform.OS !== 'web' && typeof getReactNativePersistence === 'function') {
@@ -96,7 +102,7 @@ export const initFirebase = () => {
     }
   }
 
-  return { app, db, auth };
+  return { app, db, auth, storage };
 };
 
 // Avoid creating a Firebase app with sample IDs. App.js shows setup guidance
@@ -120,11 +126,17 @@ export const getFirebaseApp = () => {
   return app;
 };
 
+export const getFirebaseStorage = () => {
+  if (!storage) initFirebase();
+  return storage;
+};
+
 export default {
   initFirebase,
   getDb,
   getFirebaseAuth,
   getFirebaseApp,
+  getFirebaseStorage,
   getMissingFirebaseConfig,
   isFirebaseConfigured,
 };

@@ -1,5 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 import {
   initializeAuth,
   getReactNativePersistence,
@@ -41,6 +42,7 @@ const firebaseConfig = {
 let app;
 let db;
 let auth;
+let storage;
 
 export const initFirebase = () => {
   if (!getApps().length) {
@@ -51,6 +53,10 @@ export const initFirebase = () => {
 
   if (!db) {
     db = getFirestore(app);
+  }
+
+  if (!storage) {
+    storage = getStorage(app);
   }
 
   if (!auth) {
@@ -67,7 +73,7 @@ export const initFirebase = () => {
     }
   }
 
-  return { app, db, auth };
+  return { app, db, auth, storage };
 };
 
 // Initialize default instance
@@ -88,9 +94,15 @@ export const getFirebaseApp = () => {
   return app;
 };
 
+export const getFirebaseStorage = () => {
+  if (!storage) initFirebase();
+  return storage;
+};
+
 export default {
   initFirebase,
   getDb,
   getFirebaseAuth,
   getFirebaseApp,
+  getFirebaseStorage,
 };

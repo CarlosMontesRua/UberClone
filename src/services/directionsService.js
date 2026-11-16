@@ -143,8 +143,8 @@ export async function fetchDrivingRoute(origin, destination) {
 }
 
 /**
- * Pickup: driver → passenger origin
- * Dropoff: driver (or pickup) → destination
+ * Pickup: driver GPS → origen del pasajero
+ * Dropoff: origen del pasajero → destino (no reinicia desde el GPS del conductor)
  */
 export function getRouteEndpoints({ trip, driverLocation }) {
   if (!trip?.origin || !trip?.destination) return null;
@@ -170,16 +170,16 @@ export function getRouteEndpoints({ trip, driverLocation }) {
       mode: 'pickup',
       origin: driverPoint || pickup,
       destination: pickup,
-      label: 'Ruta a recogida',
+      label: 'Ruta hacia el pasajero',
     };
   }
 
   if (trip.status === 'in_progress') {
     return {
       mode: 'dropoff',
-      origin: driverPoint || pickup,
+      origin: pickup,
       destination: dropoff,
-      label: 'Ruta al destino',
+      label: 'Ruta hacia el destino',
     };
   }
 

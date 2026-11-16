@@ -294,6 +294,10 @@ export const PersonalDataScreen = ({ navigation }) => {
               value={getPickerDate(values.birthDate)}
               mode="date"
               display="spinner"
+              themeVariant="light"
+              textColor={colors.text}
+              locale="es-CO"
+              style={styles.dateSpinner}
               minimumDate={MIN_BIRTH_DATE}
               maximumDate={new Date()}
               onChange={handleDateChange}
@@ -377,6 +381,11 @@ const styles = StyleSheet.create({
   dateDone: {
     ...typography.label,
     color: colors.accent,
+  },
+  dateSpinner: {
+    height: 216,
+    width: '100%',
+    alignSelf: 'center',
   },
   requiredHint: {
     ...typography.caption,

@@ -459,6 +459,10 @@ export const DocumentsScreen = ({ navigation }) => {
               value={getPickerDate(activeDateField ? values[activeDateField] : '')}
               mode="date"
               display="spinner"
+              themeVariant="light"
+              textColor={colors.text}
+              locale="es-CO"
+              style={styles.dateSpinner}
               minimumDate={MIN_DATE}
               maximumDate={MAX_DATE}
               onChange={handleDateChange}
@@ -558,6 +562,11 @@ const styles = StyleSheet.create({
   dateDone: {
     ...typography.label,
     color: colors.accent,
+  },
+  dateSpinner: {
+    height: 216,
+    width: '100%',
+    alignSelf: 'center',
   },
   termsRow: {
     flexDirection: 'row',

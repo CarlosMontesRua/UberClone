@@ -13,6 +13,10 @@ module.exports = {
           'UberClone necesita tu ubicación para mostrarte en el mapa y enviarla mientras estás disponible.',
         NSLocationAlwaysAndWhenInUseUsageDescription:
           'UberClone usa tu ubicación en segundo plano solo mientras estás disponible para recibir viajes.',
+        NSAppTransportSecurity: {
+          NSAllowsArbitraryLoads: true,
+          NSAllowsLocalNetworking: true,
+        },
       },
       config: {
         ...(appJson.expo.ios?.config || {}),
@@ -21,10 +25,13 @@ module.exports = {
     },
     android: {
       ...appJson.expo.android,
+      // Permitir http://IP:3001 desde el celular (dev)
+      usesCleartextTraffic: true,
       permissions: [
         'ACCESS_COARSE_LOCATION',
         'ACCESS_FINE_LOCATION',
         'FOREGROUND_SERVICE',
+        'INTERNET',
       ],
       config: {
         ...(appJson.expo.android?.config || {}),
@@ -51,6 +58,8 @@ module.exports = {
           androidGoogleMapsApiKey: googleMapsApiKey,
         },
       ],
+      'expo-notifications',
+      'expo-web-browser',
     ],
   },
 };

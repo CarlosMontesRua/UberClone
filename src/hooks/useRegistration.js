@@ -113,7 +113,13 @@ export const useImagePicker = () => {
 
       if (result.canceled || !result.assets?.length) return null;
 
-      return result.assets[0].uri;
+      const localUri = result.assets[0].uri;
+      try {
+        const { uploadImageAsync } = await import('../services/cloudinaryService');
+        return await uploadImageAsync(localUri, 'uberclone/drivers');
+      } catch {
+        return localUri;
+      }
     } catch {
       Alert.alert(
         'No se pudo abrir la imagen',

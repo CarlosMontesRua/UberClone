@@ -12,10 +12,11 @@ import {
   onSnapshot,
 } from 'firebase/firestore';
 import { getDb } from '../config/firebase';
+import { calculateFare, PRICING } from '../config/pricing';
 
 const TRIPS = 'trips';
-export const COMMISSION_RATE = 0.20; // 20% de comisión de la plataforma
-export const REQUEST_EXPIRATION_SECONDS = 15; // 15 segundos para atender solicitud
+export const COMMISSION_RATE = PRICING.commissionRate;
+export const REQUEST_EXPIRATION_SECONDS = 15;
 
 export const tripService = {
   /**
@@ -34,10 +35,11 @@ export const tripService = {
     const now = new Date();
     const nowIso = now.toISOString();
 
-    const fare = Math.round(Number(tripData.fare) || 0);
     const tip = Math.round(Number(tripData.tip) || 0);
-    const commission = Math.round(fare * COMMISSION_RATE);
-    const driverEarnings = Math.round(fare - commission + tip);
+    const distanceKm = Number(tripData.distanceKm) || 3.5;
+    const durationMin = Number(tripData.durationMin) || 12;
+    const category = tripData.category || 'economy';
+    const priced = calculateFare({ distanceKm, durationMin, category, tip });
 
     const payload = {
       id: tripRef.id,
@@ -45,19 +47,20 @@ export const tripService = {
       passengerId: tripData.passengerId || 'pasajero_demo',
       origin: tripData.origin || { address: 'Origen no especificado', latitude: 4.6097, longitude: -74.0817 },
       destination: tripData.destination || { address: 'Destino no especificado', latitude: 4.6533, longitude: -74.0836 },
-      distanceKm: Number(tripData.distanceKm) || 3.5,
-      durationMin: Number(tripData.durationMin) || 12,
-      category: tripData.category || 'economy',
-      fare,
-      commission,
+      distanceKm,
+      durationMin,
+      category,
+      fare: priced.fare,
+      commission: priced.commission,
       tip,
-      driverEarnings,
-      commissionRate: COMMISSION_RATE,
+      driverEarnings: priced.driverEarnings,
+      commissionRate: priced.commissionRate,
       paymentMethod: tripData.paymentMethod || 'cash',
       paymentStatus: tripData.paymentStatus || 'pending',
       paymentId: tripData.paymentId || `PAY-${Date.now()}`,
       status: 'requested',
       rating: Number(tripData.rating) || 0,
+      routePolyline: tripData.routePolyline || [],
       createdAt: nowIso,
       expiresAt: now.getTime() + REQUEST_EXPIRATION_SECONDS * 1000,
       completedAt: null,
@@ -242,8 +245,9 @@ export const tripService = {
   async getTripHistory(driverId, filters = {}) {
     if (!driverId) return [];
     const db = getDb();
+    const limitCount = Number(filters.limit) || 20;
 
-    let q = query(
+    const q = query(
       collection(db, TRIPS),
       where('driverId', '==', driverId),
       orderBy('createdAt', 'desc'),
@@ -256,6 +260,10 @@ export const tripService = {
       trips = trips.filter((t) => t.status === filters.status);
     }
 
+    if (filters.paymentMethod && filters.paymentMethod !== 'all') {
+      trips = trips.filter((t) => t.paymentMethod === filters.paymentMethod);
+    }
+
     if (filters.startDate) {
       trips = trips.filter((t) => new Date(t.createdAt) >= new Date(filters.startDate));
     }
@@ -264,7 +272,36 @@ export const tripService = {
       trips = trips.filter((t) => new Date(t.createdAt) <= new Date(filters.endDate));
     }
 
-    return trips;
+    return trips.slice(0, limitCount);
+  },
+
+  async markCashPaymentReceived(tripId) {
+    await this.changeTripStatus(tripId, 'paid', {
+      paymentMethod: 'cash',
+      paymentStatus: 'paid',
+      paymentId: `CASH-${Date.now()}`,
+    });
+  },
+
+  async completeTripWithFare(tripId, { distanceKm, durationMin, category, tip, routePolyline }) {
+    const trip = await this.getTrip(tripId);
+    if (!trip) throw new Error('Viaje no encontrado');
+
+    const priced = calculateFare({
+      distanceKm: distanceKm ?? trip.distanceKm,
+      durationMin: durationMin ?? trip.durationMin,
+      category: category || trip.category,
+      tip: tip ?? trip.tip ?? 0,
+    });
+
+    await this.changeTripStatus(tripId, 'completed', {
+      ...priced,
+      tip: Math.round(Number(tip ?? trip.tip) || 0),
+      routePolyline: routePolyline || trip.routePolyline || [],
+      completedAt: new Date().toISOString(),
+    });
+
+    return this.getTrip(tripId);
   },
 
   async deleteTrip(tripId) {

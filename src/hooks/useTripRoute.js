@@ -12,6 +12,9 @@ export const useTripRoute = ({ trip, driverLocation }) => {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  const isPickupPhase =
+    trip?.status === 'accepted' || trip?.status === 'driver_arriving';
+
   const endpoints = useMemo(
     () => directionsService.getRouteEndpoints({ trip, driverLocation }),
     [
@@ -21,8 +24,8 @@ export const useTripRoute = ({ trip, driverLocation }) => {
       trip?.origin?.longitude,
       trip?.destination?.latitude,
       trip?.destination?.longitude,
-      // Round so tiny GPS jitter does not spam Directions API
-      driverLocation
+      // Solo en pickup: el GPS define el origen. En dropoff sale del punto de recogida.
+      isPickupPhase && driverLocation
         ? `${driverLocation.latitude.toFixed(4)},${driverLocation.longitude.toFixed(4)}`
         : null,
     ],
@@ -39,6 +42,9 @@ export const useTripRoute = ({ trip, driverLocation }) => {
         return;
       }
 
+      // Limpia la ruta anterior para no reanimar el tramo viejo al cambiar de fase
+      setCoordinates([]);
+      setMeta({ mode: endpoints.mode, label: endpoints.label });
       setLoading(true);
       setError(null);
       try {
